@@ -1,0 +1,16 @@
+# 개인 설정 (자신의 Gist 정보) — 예시 파일을 복사해 만드세요
+collector/.env
+ios/Shared/Secrets.swift
+
+# 수집기 상태
+collector/.last-upload-hash
+
+# 생성물 (xcodegen generate 로 재생성)
+ios/*.xcodeproj
+
+# macOS / Xcode
+.DS_Store
+xcuserdata/
+DerivedData/
+node_modules/
+supabase/.temp/
