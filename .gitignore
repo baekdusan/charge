@@ -1,6 +1,3 @@
-# 개인 설정 (자신의 Gist 정보) — 예시 파일을 복사해 만드세요
-collector/.env
-
 # 수집기 상태
 collector/.last-upload-hash
 
@@ -14,5 +11,10 @@ DerivedData/
 node_modules/
 supabase/.temp/
 
-# 개인 기본 Gist 주소 (번들 리소스)
-ios/Shared/DefaultGist.txt
+# 호스팅(멀티유저) 백엔드 주소 — 출시 시 전용 프로젝트로 교체
+ios/Shared/CloudConfig.txt
+collector/cloud.json
+
+# 구버전 개인 설정 잔재 — 새 수집기는 안 읽지만 실수로 커밋되지 않게 유지
+collector/.env
+collector/.last-payload.json

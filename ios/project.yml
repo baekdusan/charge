@@ -36,6 +36,8 @@ targets:
       properties:
         com.apple.security.application-groups:
           - group.com.dusan.charge
+        com.apple.developer.applesignin:
+          - Default
     dependencies:
       - target: ChargeWidget
     scheme:

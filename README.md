@@ -19,62 +19,43 @@ Charge는 데스크톱의 사용량 데이터를 가벼운 수집기로 모아 *
 - **스트릭 잔디** — GitHub 잔디 스타일의 최근 70일 히트맵 (그날 쓴 비용만큼 진해짐) + 연속 사용일 🔥
 - **홈 화면 위젯** — 프로바이더별 게이지 (스몰: 적층 / 미디엄: 2열, 프로바이더 선택 가능)
 - **잠금화면 위젯** — 1×1 고리형 게이지, 1×2 바형 게이지
-- **온보딩 & 설정** — 앱에서 Gist 주소만 붙여넣으면 연결 완료, 프로바이더 표시 켜고 끄기, 게이지 임계값 조정
+- **온보딩 & 설정** — Apple 로그인 후 터미널 명령 한 줄이면 연결 완료, 프로바이더 표시 켜고 끄기, 게이지 임계값 조정
 - **다크 테마** — 앱 아이콘과 통일된 네이비 그라데이션
 
 ## 아키텍처
 
 ```
+[iPhone] Apple 로그인 → 페어링 코드 발급 → RLS로 본인 행만 조회
 [데스크톱] 수집기 (Node.js, 5분 간격 스케줄)
     ├─ ccusage — 로컬 세션 로그에서 일별 비용·토큰 집계
-    ├─ Claude OAuth usage API — 세션/주간 한도 % (로컬 자격증명 재사용)
-    ├─ ~/.codex 세션 로그 — Codex 레이트리밋 스냅샷
-    └─ 변경이 있을 때만 시크릿 Gist에 JSON 업로드
-[GitHub Gist] charge.json — 데이터 저장소 (서버 불필요, 무료)
-[iPhone] SwiftUI 앱 + WidgetKit 위젯 — raw URL 읽기 전용 조회
+    ├─ Claude OAuth usage API — 세션/주간 한도 % + 플랜 (로컬 자격증명 재사용)
+    ├─ ~/.codex — Codex 레이트리밋·플랜 스냅샷
+    └─ 디바이스 토큰으로 charge_upload RPC 호출
+[Supabase] Postgres + Auth — 사용자별 격리(RLS), 디바이스 토큰은 해시만 저장
 ```
 
-서버가 없습니다. 데이터는 본인의 시크릿 Gist에만 저장되고, 인증은 이미 로그인된 `gh` CLI 세션을 재사용합니다.
+앱은 로그인한 본인 데이터만 읽을 수 있고, 수집기는 페어링으로 발급받은 디바이스 토큰으로 본인 행에만 씁니다.
 
-## 요구사항
+## 사용자 설치 (2분)
 
-- macOS (Windows 수집기는 로드맵 참고)
-- [Node.js](https://nodejs.org) 18+
-- [GitHub CLI](https://cli.github.com) — `gh auth login` 완료 상태 (gist 권한 포함)
-- Xcode 15+ / iOS 17+
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
-- (선택) [ccusage](https://github.com/ryoppippi/ccusage) 전역 설치 시 수집 속도 향상: `npm i -g ccusage`
+1. iPhone에 Charge 설치 → **Apple로 로그인**
+2. 앱이 보여주는 명령을 컴퓨터 터미널에 붙여넣기:
+   ```bash
+   npx charge-collector <페어링코드>
+   ```
+3. 끝 — 페어링, 첫 수집, 5분 간격 자동 수집 등록까지 한 번에 됩니다.
 
-## 설치
+요구사항은 [Node.js](https://nodejs.org) 18+뿐입니다 (macOS/Windows). Claude 자격증명은 macOS에선 Keychain, Windows에선 `~/.claude/.credentials.json`에서 자동으로 읽습니다. (선택) `npm i -g ccusage`를 해두면 수집이 빨라집니다.
 
-### 1. 데이터 저장용 Gist 생성
-
-```bash
-echo '{"generated_at":null,"daily":[],"live":null,"providers":[]}' > charge.json
-gh gist create charge.json --desc "Charge usage data"
-# 출력된 URL의 마지막 부분이 GIST_ID
-```
-
-### 2. 수집기 설정
-
-```bash
-cd collector
-cp .env.example .env        # GIST_ID 입력
-node collect.js --dry-run   # 데이터 파싱 확인
-node collect.js             # 첫 업로드
-./install.sh                # launchd 등록 (5분 간격)
-```
-
-### 3. iOS 앱 빌드
+## 개발 빌드
 
 ```bash
 cd ios
-xcodegen generate
+xcodegen generate    # Xcode 15+ / iOS 17+ / XcodeGen 필요
 open Charge.xcodeproj
 ```
 
-Xcode에서 기기에 Run 한 뒤, 앱 설정(⚙️)에서 1단계에서 만든 Gist 주소를 붙여넣으면 연결 끝.
-매번 입력하기 싫으면 `ios/Shared/DefaultGist.txt`에 raw URL을 적어두면 기본값으로 쓰입니다 (gitignore 대상).
+백엔드 주소는 `ios/Shared/CloudConfig.txt`(1행 URL, 2행 anon key)와 `collector/cloud.json`에 있습니다 (gitignore 대상 — 자기 Supabase 프로젝트에 `supabase/schema-v2.sql`을 실행하고 채우면 됩니다).
 
 > App Group(`group.com.dusan.charge`)을 사용하므로 포크해서 쓸 때는 번들 ID와 그룹 ID를 자신의 팀에 맞게 `project.yml`에서 바꿔주세요.
 
@@ -86,28 +67,21 @@ Xcode에서 기기에 Run 한 뒤, 앱 설정(⚙️)에서 1단계에서 만든
 | 수집기 로그 | `tail -f ~/Library/Logs/charge-collector.log` |
 | 수집기 해제 | `launchctl unload ~/Library/LaunchAgents/com.charge.collector.plist` |
 
-## 다른 머신에서 이어서 개발하기
+## 여러 컴퓨터에서 쓰기
 
-레포를 클론한 뒤, gitignore라 함께 오지 않는 개인 설정 두 가지만 챙기면 됩니다:
+앱 설정 → "다른 컴퓨터 페어링"으로 코드를 새로 발급받아 각 머신에서 `npx charge-collector <코드>`를 실행하면 됩니다.
 
-```bash
-git clone https://github.com/baekdusan/charge && cd charge
-cp collector/.env.example collector/.env      # GIST_ID 입력 (기존 머신의 값 그대로)
-echo "https://gist.githubusercontent.com/<user>/<id>/raw/charge.json" > ios/Shared/DefaultGist.txt
-cd ios && xcodegen generate
-```
-
-`gh auth login`이 되어 있어야 수집기가 업로드할 수 있습니다. 주의: 수집기는 Gist 전체를 덮어쓰므로, **여러 머신에서 동시에 수집기를 돌리면 마지막에 올린 머신의 데이터만 남습니다**. 지금은 주로 코딩하는 머신 한 곳에서만 수집기를 돌리세요 (머신별 병합은 로드맵).
+일별 비용/토큰은 **머신별 행으로 따로 저장되고 앱이 날짜별로 합산**해 보여줍니다. 맥북에서 $40, 맥미니에서 $10을 썼다면 앱에는 $50으로 표시되고, 어느 한 대가 꺼져 있어도 다른 머신의 기록은 유지됩니다. 레이트리밋·플랜은 계정 단위 값이라 어떤 머신이 올려도 항상 최신입니다.
 
 ## 로드맵
 
-- [ ] **Windows 수집기** — 수집기가 이미 Node라 포팅 부담이 적습니다 (자격증명 파일 폴백 + Task Scheduler). 이 프로젝트의 원래 동기가 "메뉴바 앱이 없는 Windows 사용자도 폰으로 사용량을 보게 하자"입니다
+- [x] **Windows 수집기** — 자격증명 파일 폴백 + `install.ps1`(Task Scheduler). 실기 검증은 아직 (Windows 머신에서 `--dry-run`부터 확인 권장)
 - [ ] **리셋 로컬 알림** — 리셋 시각은 미리 알 수 있으므로 서버 없이 iOS 로컬 알림 예약으로 "한도가 리셋됐어요" 알림 가능
 - [ ] **폰 단독 모드** — 앱에서 직접 로그인해 레이트리밋 %를 조회 (데스크톱 수집기 없이 동작)
-- [ ] 멀티 머신 수집 병합
-- [ ] 임계값 푸시 알림 (서버 필요, Supabase 연동 시)
+- [x] 멀티유저 백엔드 — Apple 로그인 + 페어링 코드 + RLS 격리 (`supabase/schema-v2.sql`)
+- [x] 멀티 머신 수집 병합 — 디바이스별 행 저장 + 앱에서 날짜별 합산
+- [ ] 임계값 푸시 알림
 - [ ] 프로바이더 추가 (Gemini, Copilot, OpenRouter, …)
-- [ ] 멀티유저 백엔드 (Supabase)
 
 ## 크레딧
 
