@@ -7,19 +7,19 @@ import AppIntents
 enum ProviderChoice: String, AppEnum {
     case all, claude, codex
 
-    static var typeDisplayRepresentation: TypeDisplayRepresentation = "프로바이더"
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "Provider"
     static var caseDisplayRepresentations: [ProviderChoice: DisplayRepresentation] = [
-        .all: "모두",
+        .all: "All",
         .claude: "Claude",
         .codex: "Codex",
     ]
 }
 
 struct SelectProviderIntent: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource = "프로바이더 선택"
-    static var description = IntentDescription("표시할 AI 프로바이더를 고릅니다.")
+    static var title: LocalizedStringResource = "Choose Provider"
+    static var description = IntentDescription("Pick which AI provider to show.")
 
-    @Parameter(title: "프로바이더", default: .all)
+    @Parameter(title: "Provider", default: .all)
     var provider: ProviderChoice
 }
 
@@ -54,7 +54,7 @@ struct ProviderTimelineProvider: AppIntentTimelineProvider {
 
     func timeline(for configuration: SelectProviderIntent, in context: Context) async -> Timeline<ProviderEntry> {
         var chosen: [Provider] = []
-        if let all = try? await ChargeAPI.fetchAll().providers, !all.isEmpty {
+        if let all = await ChargeAPI.fetchAllOrCached()?.providers, !all.isEmpty {
             let visible = all.filter { !ChargeConfig.isHidden($0.id) }
             switch configuration.provider {
             case .all: chosen = visible
@@ -73,7 +73,7 @@ private func gaugeTint(_ pct: Double) -> Color {
 }
 
 struct ProviderBar: View {
-    let title: String
+    let title: LocalizedStringKey
     let window: RateWindow?
 
     var body: some View {
@@ -106,8 +106,8 @@ struct ProviderColumn: View {
                     Text(reset).font(.caption2).foregroundStyle(.secondary)
                 }
             }
-            ProviderBar(title: "세션", window: provider.session)
-            ProviderBar(title: "주간", window: provider.weekly)
+            ProviderBar(title: "Session", window: provider.session)
+            ProviderBar(title: "Weekly", window: provider.weekly)
         }
     }
 }
@@ -136,7 +136,7 @@ struct ProviderWidgetView: View {
     private var smallView: some View {
         VStack(alignment: .leading, spacing: 10) {
             if entry.providers.isEmpty {
-                Text("데이터 없음").font(.caption).foregroundStyle(.secondary)
+                Text("No data").font(.caption).foregroundStyle(.secondary)
             }
             ForEach(entry.providers) { p in
                 ProviderColumn(provider: p, showReset: entry.providers.count == 1)
@@ -150,7 +150,7 @@ struct ProviderWidgetView: View {
     private var mediumView: some View {
         HStack(alignment: .top, spacing: 16) {
             if entry.providers.isEmpty {
-                Text("데이터 없음").font(.caption).foregroundStyle(.secondary)
+                Text("No data").font(.caption).foregroundStyle(.secondary)
             }
             ForEach(entry.providers) { p in
                 ProviderColumn(provider: p)
@@ -176,15 +176,15 @@ struct ProviderWidgetView: View {
     private var rectangularView: some View {
         VStack(alignment: .leading, spacing: 2) {
             if entry.providers.isEmpty {
-                Text("데이터 없음").font(.caption2)
+                Text("No data").font(.caption2)
             }
             ForEach(entry.providers.prefix(3)) { p in
                 HStack(spacing: 6) {
                     Text(p.name).font(.caption.bold())
                     Spacer()
-                    Text("세션 \(Int(p.session?.percent ?? 0))%")
+                    Text("S \(Int(p.session?.percent ?? 0))%")
                         .font(.caption2.monospacedDigit())
-                    Text("주간 \(Int(p.weekly?.percent ?? 0))%")
+                    Text("W \(Int(p.weekly?.percent ?? 0))%")
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -203,8 +203,8 @@ struct ProviderWidget: Widget {
                                provider: ProviderTimelineProvider()) { entry in
             ProviderWidgetView(entry: entry)
         }
-        .configurationDisplayName("프로바이더 게이지")
-        .description("AI 프로바이더별 세션·주간 사용량. 기본은 모두 표시, 길게 눌러 선택 가능.")
+        .configurationDisplayName("Provider Gauges")
+        .description("Session and weekly usage per provider. Long-press to choose one.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
     }
 }

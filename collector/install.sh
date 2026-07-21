@@ -4,7 +4,6 @@ set -euo pipefail
 
 LABEL="com.charge.collector"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
-NODE_BIN="$(command -v node)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG="$HOME/Library/Logs/charge-collector.log"
 
@@ -18,8 +17,9 @@ cat > "$PLIST" <<EOF
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$NODE_BIN</string>
-    <string>$SCRIPT_DIR/collect.js</string>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>exec node "$SCRIPT_DIR/collect.js"</string>
   </array>
   <key>StartInterval</key><integer>300</integer>
   <key>RunAtLoad</key><true/>

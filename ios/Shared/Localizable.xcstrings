@@ -1,0 +1,652 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Updated just now": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "방금 업데이트됨"
+          }
+        }
+      }
+    },
+    "Updated %lldm ago": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld분 전 업데이트됨"
+          }
+        }
+      }
+    },
+    "Provider": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "프로바이더"
+          }
+        }
+      }
+    },
+    "All": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "전체"
+          }
+        }
+      }
+    },
+    "Today": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘"
+          }
+        }
+      }
+    },
+    "%@ tokens": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 토큰"
+          }
+        }
+      }
+    },
+    "7d %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7일 %@"
+          }
+        }
+      }
+    },
+    "30d %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30일 %@"
+          }
+        }
+      }
+    },
+    "Today %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘 %@"
+          }
+        }
+      }
+    },
+    "Session": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "세션"
+          }
+        }
+      }
+    },
+    "Weekly": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "주간"
+          }
+        }
+      }
+    },
+    "%@ weekly": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 주간"
+          }
+        }
+      }
+    },
+    "used": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용"
+          }
+        }
+      }
+    },
+    "Limit reached": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "한도 도달"
+          }
+        }
+      }
+    },
+    "⚡ On pace to run out in %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "⚡ 이 속도면 %@ 후 소진"
+          }
+        }
+      }
+    },
+    "Current 5h window": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "현재 5시간 창"
+          }
+        }
+      }
+    },
+    "Resets %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "리셋 %@"
+          }
+        }
+      }
+    },
+    "%@/hr": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@/시간"
+          }
+        }
+      }
+    },
+    "Projected %@ by window end": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 속도면 창 종료까지 총 %@ 예상"
+          }
+        }
+      }
+    },
+    "Streak": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "스트릭"
+          }
+        }
+      }
+    },
+    "🔥 %lld day streak": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "🔥 %lld일 연속"
+          }
+        }
+      }
+    },
+    "Cost, last %lld days": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "최근 %lld일 비용"
+          }
+        }
+      }
+    },
+    "Today by model": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘 모델별"
+          }
+        }
+      }
+    },
+    "Set your Gist URL in Settings (top right).": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오른쪽 위 설정에서 Gist 주소를 입력해주세요."
+          }
+        }
+      }
+    },
+    "Failed to load: %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "불러오기 실패: %@"
+          }
+        }
+      }
+    },
+    "Providers": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "프로바이더"
+          }
+        }
+      }
+    },
+    "Hidden providers disappear from the app and widgets. New tools are detected by the desktop collector and appear here automatically.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "끄면 앱과 위젯에서 숨겨집니다. 새 도구는 데스크톱 수집기가 감지해 이 목록에 자동으로 나타납니다."
+          }
+        }
+      }
+    },
+    "Warning (orange)": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "경고 (주황)"
+          }
+        }
+      }
+    },
+    "Critical (red)": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "위험 (빨강)"
+          }
+        }
+      }
+    },
+    "Gauge color thresholds": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "게이지 색상 임계값"
+          }
+        }
+      }
+    },
+    "Gauge colors change when usage crosses these thresholds.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용률이 임계값을 넘으면 게이지 색이 바뀝니다."
+          }
+        }
+      }
+    },
+    "Chart": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "차트"
+          }
+        }
+      }
+    },
+    "Period": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "표시 기간"
+          }
+        }
+      }
+    },
+    "7d": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "7일"
+          }
+        }
+      }
+    },
+    "14d": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "14일"
+          }
+        }
+      }
+    },
+    "30d": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30일"
+          }
+        }
+      }
+    },
+    "Gist URL": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gist 주소"
+          }
+        }
+      }
+    },
+    "Save URL": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "주소 저장"
+          }
+        }
+      }
+    },
+    "Saved ✓": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "저장됨 ✓"
+          }
+        }
+      }
+    },
+    "Last collected": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "마지막 수집"
+          }
+        }
+      }
+    },
+    "Data source": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "데이터 소스"
+          }
+        }
+      }
+    },
+    "The secret Gist your desktop collector uploads to.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "데스크톱 수집기가 업로드하는 시크릿 Gist 주소입니다."
+          }
+        }
+      }
+    },
+    "About": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "정보"
+          }
+        }
+      }
+    },
+    "Version": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "버전"
+          }
+        }
+      }
+    },
+    "Name": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이름"
+          }
+        }
+      }
+    },
+    "charge = battery + billing": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "충전 + 청구"
+          }
+        }
+      }
+    },
+    "GitHub repository": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "GitHub 저장소"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "설정"
+          }
+        }
+      }
+    },
+    "Done": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "완료"
+          }
+        }
+      }
+    },
+    "Resets soon": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "곧 재설정"
+          }
+        }
+      }
+    },
+    "Resets in %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 후 재설정"
+          }
+        }
+      }
+    },
+    "soon": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "곧"
+          }
+        }
+      }
+    },
+    "Data source (Gist URL) is not set.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "데이터 소스(Gist URL)가 설정되지 않았습니다."
+          }
+        }
+      }
+    },
+    "%@ tok, 7d %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ tok, 7일 %@"
+          }
+        }
+      }
+    },
+    "No active session": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "활성 세션 없음"
+          }
+        }
+      }
+    },
+    "Token Usage": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "토큰 사용량"
+          }
+        }
+      }
+    },
+    "Today's AI coding cost and the current 5h window.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘의 AI 코딩 비용과 현재 5시간 창."
+          }
+        }
+      }
+    },
+    "Provider Gauges": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "프로바이더 게이지"
+          }
+        }
+      }
+    },
+    "Session and weekly usage per provider. Long-press to choose one.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "프로바이더별 세션·주간 사용량. 길게 눌러 선택하세요."
+          }
+        }
+      }
+    },
+    "No data": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "데이터 없음"
+          }
+        }
+      }
+    },
+    "Choose Provider": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "프로바이더 선택"
+          }
+        }
+      }
+    },
+    "Pick which AI provider to show.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "표시할 AI 프로바이더를 고릅니다."
+          }
+        }
+      }
+    },
+    "today_peak_ratio": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today is %lld%% of your recent peak"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "오늘은 최근 최고치의 %lld%%를 썼어요"
+          }
+        }
+      }
+    },
+    "5h %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "5시간 창 %@"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

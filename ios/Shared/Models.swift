@@ -1,5 +1,19 @@
 import Foundation
 
+/// 지역 설정(비그레고리력 등)과 무관하게 안정적인 yyyy-MM-dd 처리
+enum ChargeDate {
+    static let day: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.timeZone = .current
+        return f
+    }()
+
+    static func todayString() -> String { day.string(from: Date()) }
+}
+
 struct DailyUsage: Codable, Identifiable {
     let period: String
     let totalCost: Double
@@ -13,10 +27,7 @@ struct DailyUsage: Codable, Identifiable {
     var id: String { period }
 
     var date: Date {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = .current
-        return f.date(from: period) ?? .distantPast
+        ChargeDate.day.date(from: period) ?? .distantPast
     }
 
     /// 같은 모델이 여러 에이전트에 걸쳐 나뉜 항목을 모델명 기준으로 합산
@@ -125,17 +136,24 @@ struct RateWindow: Codable {
         return Self.isoFrac.date(from: s) ?? Self.iso.date(from: s)
     }
 
-    /// "4h 9m 후 재설정" 형태의 남은 시간 문자열
-    var resetText: String? {
-        guard let s = resetShort else { return nil }
-        return s == "곧" ? "곧 재설정" : "\(s) 후 재설정"
+    /// 리셋 시각이 이미 지난 창 (수집 지연으로 생기는 낡은 스냅샷)
+    var isStale: Bool {
+        guard let d = resetDate else { return false }
+        return d < Date()
     }
 
-    /// 위젯용 축약 표기: "4h 9m", "5d 6h", "곧"
+    /// "Resets in 4h 9m" 형태의 남은 시간 문자열
+    var resetText: String? {
+        guard let d = resetDate else { return nil }
+        guard d.timeIntervalSinceNow > 0 else { return String(localized: "Resets soon") }
+        return String(localized: "Resets in \(resetShort ?? "")")
+    }
+
+    /// 위젯용 축약 표기: "4h 9m", "5d 6h"
     var resetShort: String? {
         guard let d = resetDate else { return nil }
         let sec = Int(d.timeIntervalSinceNow)
-        guard sec > 0 else { return "곧" }
+        guard sec > 0 else { return String(localized: "soon") }
         let day = sec / 86400, h = (sec % 86400) / 3600, m = (sec % 3600) / 60
         if day > 0 { return "\(day)d \(h)h" }
         if h > 0 { return "\(h)h \(m)m" }
@@ -204,6 +222,11 @@ struct ActiveBlock: Codable {
 
     var start: Date? { Self.parse(startTime) }
     var end: Date? { Self.parse(endTime) }
+
+    var isExpired: Bool {
+        guard let e = end else { return false }
+        return e < Date()
+    }
 
     /// 5시간 창에서 경과한 비율 (0...1)
     var windowProgress: Double {

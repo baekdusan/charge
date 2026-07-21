@@ -21,13 +21,13 @@ struct ContentView: View {
     private var updatedText: String? {
         guard let d = generatedAt else { return nil }
         let min = max(0, Int(-d.timeIntervalSinceNow) / 60)
-        return min == 0 ? "방금 업데이트됨" : "\(min)분 전 업데이트됨"
+        return min == 0
+            ? String(localized: "Updated just now")
+            : String(localized: "Updated \(min)m ago")
     }
 
     private var today: DailyUsage? {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return daily.first { $0.period == f.string(from: Date()) }
+        daily.first { $0.period == ChargeDate.todayString() }
     }
 
     private var weekCost: Double {
@@ -75,8 +75,8 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             if visibleProviders.count > 1 {
-                Picker("프로바이더", selection: $segment) {
-                    Text("전체").tag("all")
+                Picker("Provider", selection: $segment) {
+                    Text("All").tag("all")
                     ForEach(visibleProviders) { Text($0.name).tag($0.id) }
                 }
                 .pickerStyle(.segmented)
@@ -100,7 +100,7 @@ struct ContentView: View {
 
     private var todayCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("오늘")
+            Text("Today")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline) {
@@ -109,8 +109,8 @@ struct ContentView: View {
                 Spacer()
                 VStack(alignment: .trailing) {
                     Text("\(fmtTokens(today?.tokens(for: pid) ?? 0)) tokens")
-                    Text("7일 \(fmtUSD(weekCost))")
-                    Text("30일 \(fmtUSD(daily.suffix(30).reduce(0) { $0 + $1.cost(for: pid) }))")
+                    Text("7d \(fmtUSD(weekCost))")
+                    Text("30d \(fmtUSD(daily.suffix(30).reduce(0) { $0 + $1.cost(for: pid) }))")
                 }
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -129,17 +129,15 @@ struct ContentView: View {
 
     // MARK: 스트릭 (잔디)
 
-    private var streak: Int {
-        let costByDay = Dictionary(uniqueKeysWithValues: daily.map { ($0.period, $0.totalCost) })
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
+    private func streak(for pid: String?) -> Int {
+        let costByDay = Dictionary(uniqueKeysWithValues: daily.map { ($0.period, $0.cost(for: pid)) })
         var count = 0
         var cursor = Date()
         // 오늘 기록이 없으면 어제부터 센다
-        if (costByDay[f.string(from: cursor)] ?? 0) <= 0 {
+        if (costByDay[ChargeDate.day.string(from: cursor)] ?? 0) <= 0 {
             cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor)!
         }
-        while (costByDay[f.string(from: cursor)] ?? 0) > 0 {
+        while (costByDay[ChargeDate.day.string(from: cursor)] ?? 0) > 0 {
             count += 1
             cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor)!
         }
@@ -147,8 +145,7 @@ struct ContentView: View {
     }
 
     private var streakCard: some View {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
+        let f = ChargeDate.day
         let costByDay = Dictionary(uniqueKeysWithValues: daily.map { ($0.period, $0.cost(for: pid)) })
         let weeks = 10
         let start = Calendar.current.date(byAdding: .day, value: -(weeks * 7 - 1), to: Date())!
@@ -157,11 +154,11 @@ struct ContentView: View {
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("스트릭")
+                Text("Streak")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("🔥 \(streak)일 연속")
+                Text("🔥 \(streak(for: pid)) day streak")
                     .font(.caption.bold())
             }
             HStack(alignment: .top, spacing: 4) {
@@ -182,7 +179,7 @@ struct ContentView: View {
                 }
             }
             if (today?.cost(for: pid) ?? 0) > 0 {
-                Text("오늘은 최근 \(weeks * 7)일 최고치의 \(Int(min(todayRatio, 1) * 100))%를 썼어요")
+                Text(String(format: String(localized: "today_peak_ratio"), Int(min(todayRatio, 1) * 100)))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -203,7 +200,7 @@ struct ContentView: View {
                 Spacer()
                 let cost = todayCost(of: p)
                 if cost > 0 {
-                    Text("오늘 \(fmtUSD(cost))")
+                    Text("Today \(fmtUSD(cost))")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
@@ -213,20 +210,20 @@ struct ContentView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
-            if let s = p.session {
-                gaugeRow(title: "세션", window: s)
+            if let s = p.session, !s.isStale {
+                gaugeRow(title: "Session", window: s)
             }
-            if let w = p.weekly {
-                gaugeRow(title: "주간", window: w)
+            if let w = p.weekly, !w.isStale {
+                gaugeRow(title: "Weekly", window: w)
             }
-            ForEach(p.extras ?? []) { e in
-                gaugeRow(title: e.name, window: e.window)
+            ForEach((p.extras ?? []).filter { !$0.window.isStale }) { e in
+                gaugeRow(title: "\(e.name) weekly", window: e.window)
             }
         }
         .cardStyle()
     }
 
-    private func gaugeRow(title: String, window: RateWindow) -> some View {
+    private func gaugeRow(title: LocalizedStringKey, window: RateWindow) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
@@ -241,16 +238,19 @@ struct ContentView: View {
             }
             ProgressView(value: min(window.percent, 100), total: 100)
                 .tint(window.percent >= critThreshold ? .red : window.percent >= warnThreshold ? .orange : .green)
-            HStack {
-                Text("\(Int(window.percent))% 사용")
+            HStack(spacing: 3) {
+                Text("\(Int(window.percent))%")
                     .font(.caption.monospacedDigit())
+                Text("used")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if window.percent >= 100 {
-                    Text("한도 도달")
+                    Text("Limit reached")
                         .font(.caption.bold())
                         .foregroundStyle(.red)
                 } else if let eta = window.projectedExhaustion {
-                    Text("⚡ 이 속도면 \(paceShort(eta)) 후 소진")
+                    Text("⚡ On pace to run out in \(paceShort(eta))")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -270,12 +270,12 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Circle().fill(.green).frame(width: 8, height: 8)
-                Text("현재 5시간 창")
+                Text("Current 5h window")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
                 if let end = block.end {
-                    Text("리셋 \(end.formatted(date: .omitted, time: .shortened))")
+                    Text("Resets \(end.formatted(date: .omitted, time: .shortened))")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -285,7 +285,7 @@ struct ContentView: View {
                     .font(.title2.bold())
                 Spacer()
                 if let rate = block.burnRate {
-                    Text("\(fmtUSD(rate.costPerHour))/시간")
+                    Text("\(fmtUSD(rate.costPerHour))/hr")
                         .font(.footnote)
                         .foregroundStyle(.orange)
                 }
@@ -293,7 +293,7 @@ struct ContentView: View {
             ProgressView(value: block.windowProgress)
                 .tint(.green)
             if let proj = block.projection {
-                Text("이 속도면 창 종료까지 총 \(fmtUSD(proj.totalCost)) 예상")
+                Text("Projected \(fmtUSD(proj.totalCost)) by window end")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -303,13 +303,13 @@ struct ContentView: View {
 
     private var chartCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("최근 \(chartDays)일 비용")
+            Text("Cost, last \(chartDays) days")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Chart(daily.suffix(chartDays)) { day in
                 BarMark(
-                    x: .value("날짜", day.date, unit: .day),
-                    y: .value("비용", day.cost(for: pid))
+                    x: .value("Date", day.date, unit: .day),
+                    y: .value("Cost", day.cost(for: pid))
                 )
                 .foregroundStyle(.tint)
                 .cornerRadius(3)
@@ -326,7 +326,7 @@ struct ContentView: View {
 
     private func modelCard(_ day: DailyUsage) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("오늘 모델별")
+            Text("Today by model")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             ForEach(day.mergedModels.filter { pid == nil || providerId(forModel: $0.modelName) == pid }.prefix(5)) { m in
@@ -352,6 +352,10 @@ struct ContentView: View {
             daily = payload.daily
             live = payload.live
             providers = payload.providers ?? []
+            // 선택 중인 세그먼트가 숨겨졌거나 사라졌으면 전체로 복귀
+            if let pid, !visibleProviders.contains(where: { $0.id == pid }) {
+                segment = "all"
+            }
             if let g = payload.generatedAt {
                 let f = ISO8601DateFormatter()
                 f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -359,9 +363,9 @@ struct ContentView: View {
             }
             error = nil
         } catch ChargeError.notConfigured {
-            self.error = "오른쪽 위 ⚙️ 설정에서 Gist 주소를 입력해주세요."
+            self.error = String(localized: "Set your Gist URL in Settings (top right).")
         } catch {
-            self.error = "불러오기 실패: \(error.localizedDescription)"
+            self.error = String(localized: "Failed to load: \(error.localizedDescription)")
         }
     }
 }

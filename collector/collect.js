@@ -9,8 +9,10 @@ const path = require("node:path");
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const daysArg = process.argv.indexOf("--days");
-const DAYS = daysArg > -1 ? parseInt(process.argv[daysArg + 1], 10) : 60;
+const parsedDays = daysArg > -1 ? parseInt(process.argv[daysArg + 1], 10) : NaN;
+const DAYS = Number.isFinite(parsedDays) && parsedDays > 0 ? parsedDays : 60;
 const HASH_FILE = path.join(__dirname, ".last-upload-hash");
+const CACHE_FILE = path.join(__dirname, ".last-payload.json");
 const EXTRA_PATH = ":/opt/homebrew/bin:/usr/local/bin";
 
 function loadEnv() {
@@ -25,10 +27,11 @@ function loadEnv() {
   return { ...env, ...process.env };
 }
 
-function run(cmd, args) {
+function run(cmd, args, timeout = 120_000) {
   return execFileSync(cmd, args, {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
+    timeout,
     env: { ...process.env, PATH: `${process.env.PATH}${EXTRA_PATH}` },
   });
 }
@@ -37,9 +40,17 @@ function runCcusage(args) {
   // 전역 설치본이 있으면 사용(빠름), 없으면 npx로 대체
   try {
     return JSON.parse(run("ccusage", args));
-  } catch {
-    return JSON.parse(run("npx", ["-y", "ccusage@latest", ...args]));
+  } catch (e) {
+    console.error(`ccusage 직접 실행 실패(${e.code ?? e.message}), npx로 재시도`);
+    return JSON.parse(run("npx", ["-y", "ccusage@latest", ...args], 300_000));
   }
+}
+
+/// 리셋 시각이 이미 지난 창은 무효 처리 (리셋 후 100% 박제 방지)
+function dropExpired(w) {
+  if (!w) return null;
+  if (w.resets_at && new Date(w.resets_at).getTime() < Date.now()) return null;
+  return w;
 }
 
 function sinceStr(days) {
@@ -94,17 +105,18 @@ async function claudeProvider() {
     const extras = (d.limits ?? [])
       .filter((l) => l.kind === "weekly_scoped" && l.scope?.model?.display_name)
       .map((l) => ({
-        name: `${l.scope.model.display_name} 주간`,
+        name: l.scope.model.display_name,
         window: { percent: l.percent ?? 0, resets_at: l.resets_at ?? null, window_minutes: 10080 },
       }));
     return {
       id: "claude",
       name: "Claude",
-      session: win(d.five_hour, 300),
-      weekly: win(d.seven_day, 10080),
+      session: dropExpired(win(d.five_hour, 300)),
+      weekly: dropExpired(win(d.seven_day, 10080)),
       extras: extras.length ? extras : null,
     };
-  } catch {
+  } catch (e) {
+    console.error(`claude 프로바이더 수집 실패: ${e.message ?? e}`);
     return null;
   }
 }
@@ -151,8 +163,15 @@ function codexProvider() {
             window_minutes: w.window_minutes ?? null,
           }
         : null;
-    return { id: "codex", name: "Codex", session: win(rl.primary), weekly: win(rl.secondary), extras: null };
-  } catch {
+    return {
+      id: "codex",
+      name: "Codex",
+      session: dropExpired(win(rl.primary)),
+      weekly: dropExpired(win(rl.secondary)),
+      extras: null,
+    };
+  } catch (e) {
+    console.error(`codex 프로바이더 수집 실패: ${e.message ?? e}`);
     return null;
   }
 }
@@ -187,9 +206,28 @@ function hash(s) {
 
 (async () => {
   const env = loadEnv();
-  const daily = collectDaily();
-  const live = collectLive();
-  const providers = await collectProviders();
+  // 이전 성공 페이로드 캐시 — 일부 수집이 실패해도 그 부분만 이전 값으로 유지
+  let cache = {};
+  try {
+    cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
+  } catch {}
+
+  let daily, live, providers;
+  try {
+    daily = collectDaily();
+  } catch (e) {
+    console.error(`daily 수집 실패, 이전 값 유지: ${e.message ?? e}`);
+    daily = cache.daily ?? [];
+  }
+  try {
+    live = collectLive();
+  } catch (e) {
+    console.error(`live 수집 실패, 이전 값 유지: ${e.message ?? e}`);
+    live = cache.live ?? null;
+  }
+  providers = await collectProviders();
+  if (!providers.length && cache.providers?.length) providers = cache.providers;
+
   // generated_at은 해시 비교에서 제외해 데이터가 안 변하면 업로드도 안 하도록 한다
   const core = JSON.stringify({ daily, live, providers });
 
@@ -226,7 +264,8 @@ function hash(s) {
   if (!res.ok) throw new Error(`gist 업데이트 실패 (${res.status}): ${await res.text()}`);
 
   fs.writeFileSync(HASH_FILE, hash(core));
-  console.log(`[${new Date().toISOString()}] daily ${daily.length}행 + live 블록 업로드 완료`);
+  fs.writeFileSync(CACHE_FILE, JSON.stringify({ daily, live, providers }));
+  console.log(`[${new Date().toISOString()}] daily ${daily.length}행 + live + providers ${providers.length}개 업로드 완료`);
 })().catch((e) => {
   console.error(e.message ?? e);
   process.exit(1);

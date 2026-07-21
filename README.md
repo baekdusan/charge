@@ -86,11 +86,26 @@ Xcode에서 기기에 Run 한 뒤, 앱 설정(⚙️)에서 1단계에서 만든
 | 수집기 로그 | `tail -f ~/Library/Logs/charge-collector.log` |
 | 수집기 해제 | `launchctl unload ~/Library/LaunchAgents/com.charge.collector.plist` |
 
+## 다른 머신에서 이어서 개발하기
+
+레포를 클론한 뒤, gitignore라 함께 오지 않는 개인 설정 두 가지만 챙기면 됩니다:
+
+```bash
+git clone https://github.com/baekdusan/charge && cd charge
+cp collector/.env.example collector/.env      # GIST_ID 입력 (기존 머신의 값 그대로)
+echo "https://gist.githubusercontent.com/<user>/<id>/raw/charge.json" > ios/Shared/DefaultGist.txt
+cd ios && xcodegen generate
+```
+
+`gh auth login`이 되어 있어야 수집기가 업로드할 수 있습니다. 주의: 수집기는 Gist 전체를 덮어쓰므로, **여러 머신에서 동시에 수집기를 돌리면 마지막에 올린 머신의 데이터만 남습니다**. 지금은 주로 코딩하는 머신 한 곳에서만 수집기를 돌리세요 (머신별 병합은 로드맵).
+
 ## 로드맵
 
 - [ ] **Windows 수집기** — 수집기가 이미 Node라 포팅 부담이 적습니다 (자격증명 파일 폴백 + Task Scheduler). 이 프로젝트의 원래 동기가 "메뉴바 앱이 없는 Windows 사용자도 폰으로 사용량을 보게 하자"입니다
+- [ ] **리셋 로컬 알림** — 리셋 시각은 미리 알 수 있으므로 서버 없이 iOS 로컬 알림 예약으로 "한도가 리셋됐어요" 알림 가능
 - [ ] **폰 단독 모드** — 앱에서 직접 로그인해 레이트리밋 %를 조회 (데스크톱 수집기 없이 동작)
-- [ ] 임계값 푸시 알림
+- [ ] 멀티 머신 수집 병합
+- [ ] 임계값 푸시 알림 (서버 필요, Supabase 연동 시)
 - [ ] 프로바이더 추가 (Gemini, Copilot, OpenRouter, …)
 - [ ] 멀티유저 백엔드 (Supabase)
 
