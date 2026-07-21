@@ -5,11 +5,13 @@ struct ContentView: View {
     @State private var daily: [DailyUsage] = []
     @State private var live: ActiveBlock?
     @State private var providers: [Provider] = []
+    @State private var devices: [CollectorDevice] = []
     @State private var generatedAt: Date?
     @State private var error: String?
     @State private var loading = false
     @State private var segment = "all"
     @State private var showSettings = false
+    @State private var showOnboarding = false
     @State private var hidden: Set<String> = []
     @AppStorage("warnThreshold") private var warnThreshold = 70.0
     @AppStorage("critThreshold") private var critThreshold = 90.0
@@ -17,14 +19,6 @@ struct ContentView: View {
 
     /// 세그먼트 선택에 따른 프로바이더 필터 (nil = 전체)
     private var pid: String? { segment == "all" ? nil : segment }
-
-    private var updatedText: String? {
-        guard let d = generatedAt else { return nil }
-        let min = max(0, Int(-d.timeIntervalSinceNow) / 60)
-        return min == 0
-            ? String(localized: "Updated just now")
-            : String(localized: "Updated \(min)m ago")
-    }
 
     private var today: DailyUsage? {
         daily.first { $0.period == ChargeDate.todayString() }
@@ -56,10 +50,31 @@ struct ContentView: View {
             }) {
                 SettingsView(generatedAt: generatedAt, providers: providers)
             }
-            .refreshable { await load() }
+            // 손을 일찍 떼면 SwiftUI가 refreshable 태스크를 취소하므로,
+            // 분리된 태스크로 실행해 실제 로드가 중간에 끊기지 않게 한다
+            .refreshable { await Task { await load() }.value }
             .task {
                 hidden = ChargeConfig.hiddenProviders
+                if ChargeAuth.session == nil {
+                    showOnboarding = true
+                }
                 await load()
+                while !Task.isCancelled {
+                    do {
+                        try await Task.sleep(nanoseconds: 60_000_000_000)
+                    } catch {
+                        break
+                    }
+                    if ChargeAuth.session != nil {
+                        await load()
+                    }
+                }
+            }
+            .fullScreenCover(isPresented: $showOnboarding) {
+                OnboardingView {
+                    showOnboarding = false
+                    Task { await load() }
+                }
             }
         }
         .preferredColorScheme(.dark)
@@ -68,21 +83,18 @@ struct ContentView: View {
 
     private var content: some View {
         VStack(spacing: 16) {
-            if let updatedText {
-                Text(updatedText)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                connectionStatus(at: context.date)
             }
-            if visibleProviders.count > 1 {
+            if segmentProviders.count > 1 {
                 Picker("Provider", selection: $segment) {
                     Text("All").tag("all")
-                    ForEach(visibleProviders) { Text($0.name).tag($0.id) }
+                    ForEach(segmentProviders) { Text($0.name).tag($0.id) }
                 }
                 .pickerStyle(.segmented)
             }
             todayCard
-            ForEach(visibleProviders.filter { pid == nil || $0.id == pid }) { providerCard($0) }
+            ForEach(visibleProviders.filter { pid == nil || $0.id == pid }, id: \.uid) { providerCard($0) }
             if let live, pid == nil || pid == "claude" { liveCard(live) }
             streakCard
             chartCard
@@ -125,6 +137,72 @@ struct ContentView: View {
 
     private var visibleProviders: [Provider] {
         providers.filter { !hidden.contains($0.id) }
+    }
+
+    /// 세그먼트용: 같은 프로바이더의 계정별 카드가 여러 개여도 세그먼트는 하나만
+    private var segmentProviders: [Provider] {
+        var seen = Set<String>()
+        return visibleProviders.filter { seen.insert($0.id).inserted }
+    }
+
+    /// 같은 프로바이더가 계정별로 2개 이상일 때만 머신 이름을 보여준다
+    private func hasMultipleAccounts(_ p: Provider) -> Bool {
+        visibleProviders.filter { $0.id == p.id }.count > 1
+    }
+
+    private var latestDevice: CollectorDevice? {
+        devices.max {
+            ($0.lastSeenDate ?? .distantPast) < ($1.lastSeenDate ?? .distantPast)
+        }
+    }
+
+    private func connectionStatus(at now: Date) -> some View {
+        let lastSeen = latestDevice?.lastSeenDate
+        let deviceName = latestDevice?.label?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayName = deviceName.flatMap { $0.isEmpty ? nil : $0 }
+            ?? String(localized: "Linked PC")
+        let hasPairedDevice = latestDevice != nil
+        let isTracking = lastSeen.map {
+            let age = now.timeIntervalSince($0)
+            return age >= -60 && age <= 12 * 60
+        } ?? false
+        let color: Color = loading ? .secondary : isTracking ? .green : hasPairedDevice ? .orange : .secondary
+        let title: LocalizedStringKey = loading
+            ? "Checking PC connection"
+            : isTracking
+                ? "PC tracking active"
+                : hasPairedDevice ? "Waiting for PC" : "No PC paired"
+
+        return HStack(spacing: 10) {
+            Circle()
+                .fill(color)
+                .frame(width: 9, height: 9)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                if let lastSeen {
+                    let relative = lastSeen.formatted(
+                        .relative(presentation: .numeric, unitsStyle: .abbreviated)
+                    )
+                    Text(verbatim: "\(displayName) · \(relative)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else if !loading {
+                    Text(displayName)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            if loading {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: 스트릭 (잔디)
@@ -192,6 +270,20 @@ struct ContentView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(p.name)
                     .font(.headline)
+                if let plan = p.plan {
+                    Text(plan)
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .foregroundStyle(ChargeTheme.accent)
+                        .background(ChargeTheme.accent.opacity(0.15), in: Capsule())
+                }
+                if hasMultipleAccounts(p), let device = p.deviceShortLabel {
+                    Label(device, systemImage: "desktopcomputer")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
                 if let st = p.status, !st.isHealthy {
                     Circle()
                         .fill(st.indicator == "critical" ? .red : st.indicator == "major" ? .orange : .yellow)
@@ -210,52 +302,109 @@ struct ContentView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
-            if let s = p.session, !s.isStale {
-                gaugeRow(title: "Session", window: s)
+            if let state = p.session?.displayState() {
+                gaugeRow(title: "Session", state: state)
             }
-            if let w = p.weekly, !w.isStale {
-                gaugeRow(title: "Weekly", window: w)
+            if let state = p.weekly?.displayState() {
+                gaugeRow(title: "Weekly", state: state)
             }
-            ForEach((p.extras ?? []).filter { !$0.window.isStale }) { e in
-                gaugeRow(title: "\(e.name) weekly", window: e.window)
+            ForEach(p.extras ?? []) { e in
+                if let state = e.window.displayState() {
+                    gaugeRow(title: "\(e.name) weekly", state: state)
+                }
             }
         }
         .cardStyle()
     }
 
-    private func gaugeRow(title: LocalizedStringKey, window: RateWindow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func gaugeRow(title: LocalizedStringKey, state: RateWindowDisplayState) -> some View {
+        let window = state.window
+
+        return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if state.isEstimated {
+                    Label("Estimated", systemImage: "clock")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
                 if let reset = window.resetText {
                     Text(reset)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(state.isEstimated ? .tertiary : .secondary)
                 }
             }
-            ProgressView(value: min(window.percent, 100), total: 100)
-                .tint(window.percent >= critThreshold ? .red : window.percent >= warnThreshold ? .orange : .green)
+            if window.timeProgress != nil {
+                TimelineView(.periodic(from: .now, by: 60)) { _ in
+                    usageGauge(window, isEstimated: state.isEstimated)
+                }
+            } else {
+                usageGauge(window, isEstimated: state.isEstimated)
+            }
             HStack(spacing: 3) {
                 Text("\(Int(window.percent))%")
                     .font(.caption.monospacedDigit())
-                Text("used")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if state.isEstimated {
+                    Text("estimated")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                } else {
+                    Text("used")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
-                if window.percent >= 100 {
+                if !state.isEstimated, window.percent >= 100 {
                     Text("Limit reached")
                         .font(.caption.bold())
                         .foregroundStyle(.red)
-                } else if let eta = window.projectedExhaustion {
+                } else if !state.isEstimated, let eta = window.projectedExhaustion {
                     Text("⚡ On pace to run out in \(paceShort(eta))")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
         }
+    }
+
+    private func usageGauge(_ window: RateWindow, isEstimated: Bool) -> some View {
+        let usage = min(1, max(0, window.percent / 100))
+        let timeProgress = window.timeProgress
+        let tint: Color = window.percent >= critThreshold ? .red
+            : window.percent >= warnThreshold ? .orange
+            : .green
+
+        return GeometryReader { geo in
+            ZStack {
+                Capsule()
+                    .fill(.white.opacity(isEstimated ? 0.07 : 0.13))
+                    .frame(height: 5)
+                Capsule()
+                    .fill(tint.opacity(isEstimated ? 0.45 : 1))
+                    .frame(width: geo.size.width * usage, height: 5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .blur(radius: isEstimated ? 0.45 : 0)
+                if let timeProgress {
+                    let markerWidth = 2.0
+                    let markerCenter = min(
+                        geo.size.width - markerWidth / 2,
+                        max(markerWidth / 2, geo.size.width * timeProgress)
+                    )
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(.white.opacity(isEstimated ? 0.45 : 0.9))
+                        .frame(width: markerWidth, height: 10)
+                        .position(x: markerCenter, y: geo.size.height / 2)
+                        .blur(radius: isEstimated ? 0.45 : 0)
+                }
+            }
+        }
+        .frame(height: 10)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(isEstimated ? "Estimated usage" : "Usage")
+        .accessibilityValue("\(Int(window.percent)) percent")
     }
 
     private func paceShort(_ d: Date) -> String {
@@ -345,6 +494,10 @@ struct ContentView: View {
     }
 
     private func load() async {
+        // 이미 로드 중이면 끝날 때까지 기다렸다가 새로 로드한다 (풀 리프레시가 즉시 끝나 보이는 것 방지)
+        while loading {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
         loading = true
         defer { loading = false }
         do {
@@ -352,6 +505,8 @@ struct ContentView: View {
             daily = payload.daily
             live = payload.live
             providers = payload.providers ?? []
+            devices = payload.devices ?? []
+            ChargeConfig.rememberProviders(providers)
             // 선택 중인 세그먼트가 숨겨졌거나 사라졌으면 전체로 복귀
             if let pid, !visibleProviders.contains(where: { $0.id == pid }) {
                 segment = "all"
@@ -363,7 +518,18 @@ struct ContentView: View {
             }
             error = nil
         } catch ChargeError.notConfigured {
-            self.error = String(localized: "Set your Gist URL in Settings (top right).")
+            // 로그아웃 상태 — 이전 계정 데이터를 화면에서 지우고 온보딩으로 유도
+            daily = []
+            live = nil
+            providers = []
+            devices = []
+            generatedAt = nil
+            self.error = String(localized: "Sign in to see your usage.")
+            showOnboarding = true
+        } catch is CancellationError {
+            // 뷰 전환 등으로 취소된 로드 — 에러 아님
+        } catch let e as URLError where e.code == .cancelled {
+            // 위와 동일
         } catch {
             self.error = String(localized: "Failed to load: \(error.localizedDescription)")
         }

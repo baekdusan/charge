@@ -6,18 +6,33 @@ struct SettingsView: View {
     @AppStorage("critThreshold") private var critThreshold = 90.0
     @AppStorage("chartDays") private var chartDays = 14
     @State private var hidden = ChargeConfig.hiddenProviders
-    @State private var gistInput = ChargeConfig.gistRawURL?.absoluteString ?? ""
-    @State private var gistSaved = false
+    @State private var showGuide = false
+    @State private var accountRefresh = 0
 
     let generatedAt: Date?
     var providers: [Provider] = []
 
+    /// 페이로드의 프로바이더 + 과거에 관측했지만 지금은 빠진 프로바이더.
+    /// 숨겼거나 수집이 잠시 실패해도 토글이 목록에서 사라지지 않는다.
+    private var providerRows: [(id: String, name: String)] {
+        // 계정별 카드가 여러 개여도 표시 토글은 프로바이더당 하나
+        var seen = Set<String>()
+        var rows = providers.compactMap { p in
+            seen.insert(p.id).inserted ? (id: p.id, name: p.name) : nil
+        }
+        let missing = ChargeConfig.knownProviders
+            .filter { id, _ in !seen.contains(id) }
+            .sorted { $0.key < $1.key }
+        rows.append(contentsOf: missing.map { (id: $0.key, name: $0.value) })
+        return rows
+    }
+
     var body: some View {
         NavigationStack {
             Form {
-                if !providers.isEmpty {
+                if !providerRows.isEmpty {
                     Section {
-                        ForEach(providers) { p in
+                        ForEach(providerRows, id: \.id) { p in
                             Toggle(p.name, isOn: Binding(
                                 get: { !hidden.contains(p.id) },
                                 set: { on in
@@ -69,26 +84,30 @@ struct SettingsView: View {
                     .pickerStyle(.segmented)
                 }
 
-                Section {
-                    TextField("Gist URL", text: $gistInput)
-                        .font(.footnote.monospaced())
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                    Button(gistSaved ? "Saved ✓" : "Save URL") {
-                        if let url = ChargeConfig.normalizeGistURL(gistInput) {
-                            ChargeConfig.gistRawURL = url
-                            gistInput = url.absoluteString
-                            gistSaved = true
-                        }
-                    }
-                    .disabled(ChargeConfig.normalizeGistURL(gistInput) == nil)
-                    if let generatedAt {
+                if let generatedAt {
+                    Section {
                         LabeledContent("Last collected", value: generatedAt.formatted(date: .omitted, time: .shortened))
                     }
-                } header: {
-                    Text("Data source")
-                } footer: {
-                    Text("The secret Gist your desktop collector uploads to.")
+                }
+
+                if ChargeAuth.cloud != nil {
+                    Section("Account") {
+                        if let session = ChargeAuth.session {
+                            LabeledContent("Signed in", value: session.email ?? "Apple ID")
+                            Button("Pair another computer") { showGuide = true }
+                            Button("Sign out", role: .destructive) {
+                                ChargeAuth.signOut()
+                                accountRefresh += 1
+                            }
+                        } else {
+                            Button("Sign in") { showGuide = true }
+                        }
+                    }
+                    .id(accountRefresh)
+                }
+
+                Section {
+                    Button("Setup guide") { showGuide = true }
                 }
 
                 Section("About") {
@@ -106,6 +125,9 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .background(ChargeTheme.background.ignoresSafeArea())
+            .sheet(isPresented: $showGuide) {
+                OnboardingView { showGuide = false }
+            }
         }
         .preferredColorScheme(.dark)
         .tint(ChargeTheme.accent)
