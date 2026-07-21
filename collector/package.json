@@ -5,6 +5,9 @@
   "bin": {
     "charge-collector": "./cli.js"
   },
+  "scripts": {
+    "test": "node --test collect.test.js"
+  },
   "files": [
     "cli.js",
     "collect.js",

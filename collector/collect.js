@@ -15,6 +15,7 @@ const CACHE_FILE = path.join(__dirname, ".last-payload.json");
 const HOME = process.env.HOME ?? process.env.USERPROFILE;
 const WIN = process.platform === "win32";
 const EXTRA_PATH = WIN ? "" : ":/opt/homebrew/bin:/usr/local/bin";
+const DEFAULT_CODEXBAR_CLI = "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI";
 
 function run(cmd, args, timeout = 120_000) {
   return execFileSync(cmd, args, {
@@ -48,6 +49,87 @@ function dropExpired(w) {
   if (!w) return null;
   if (w.resets_at && new Date(w.resets_at).getTime() < Date.now()) return null;
   return w;
+}
+
+const PROVIDER_NAMES = {
+  "azure-openai": "Azure OpenAI",
+  "openai": "OpenAI",
+  "opencode": "OpenCode",
+  "opencodego": "OpenCode Go",
+  "openrouter": "OpenRouter",
+  "vertexai": "Vertex AI",
+  "alibaba-coding-plan": "Alibaba Coding Plan",
+  "alibaba-token-plan": "Alibaba Token Plan",
+  "antigravity": "Antigravity",
+  "copilot": "GitHub Copilot",
+  "deepseek": "DeepSeek",
+  "jetbrains": "JetBrains",
+  "minimax": "MiniMax",
+  "perplexity": "Perplexity",
+  "windsurf": "Windsurf",
+  "zai": "Z.ai",
+};
+
+function titleCaseProvider(id) {
+  return String(id)
+    .split(/[-_.]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function normalizeResetAt(value) {
+  if (value == null || value === "") return null;
+  const numeric = typeof value === "number" ? value : Number.NaN;
+  const date = Number.isFinite(numeric)
+    ? new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric)
+    : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function durationLabel(minutes) {
+  if (minutes === 300) return "Session";
+  if (minutes === 1440) return "Daily";
+  if (minutes === 10_080) return "Weekly";
+  if (minutes === 43_200) return "Monthly";
+  return null;
+}
+
+function explicitWindowLabel(window) {
+  const value = window?.label ?? window?.title ?? window?.displayName ?? window?.name ?? window?.limitName;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizeRateWindow(window, slot, duplicateDuration = false, forcedLabel = null) {
+  if (!window || typeof window !== "object") return null;
+  const percent = Number(window.usedPercent ?? window.percent ?? window.utilization);
+  if (!Number.isFinite(percent)) return null;
+  const rawMinutes = window.windowMinutes ?? window.window_minutes ?? window.durationMinutes;
+  const parsedMinutes = rawMinutes == null ? null : Number(rawMinutes);
+  const minutes = Number.isFinite(parsedMinutes) && parsedMinutes > 0 ? parsedMinutes : null;
+  const baseLabel = durationLabel(minutes);
+  const slotLabel = slot[0].toUpperCase() + slot.slice(1);
+  const label = forcedLabel
+    ?? explicitWindowLabel(window)
+    ?? (duplicateDuration && baseLabel ? `${slotLabel} ${baseLabel.toLowerCase()}` : baseLabel)
+    ?? slotLabel;
+  return dropExpired({
+    percent: Math.min(100, Math.max(0, percent)),
+    resets_at: normalizeResetAt(window.resetsAt ?? window.resets_at ?? window.resetAt),
+    window_minutes: minutes,
+    label,
+  });
+}
+
+function textValue(...values) {
+  return values.find((value) => typeof value === "string" && value.trim())?.trim() ?? null;
+}
+
+function usefulPlan(...values) {
+  const value = textValue(...values);
+  if (!value) return null;
+  const generic = new Set(["api", "auto", "browser", "cli", "cookie", "oauth", "unknown", "web"]);
+  return generic.has(value.toLowerCase()) ? null : value;
 }
 
 function sinceStr(days) {
@@ -128,7 +210,12 @@ async function claudeProvider() {
       .filter((l) => l.kind === "weekly_scoped" && l.scope?.model?.display_name)
       .map((l) => ({
         name: l.scope.model.display_name,
-        window: { percent: l.percent ?? 0, resets_at: l.resets_at ?? null, window_minutes: 10080 },
+        window: {
+          percent: l.percent ?? 0,
+          resets_at: l.resets_at ?? null,
+          window_minutes: 10080,
+          label: `${l.scope.model.display_name} weekly`,
+        },
       }));
     return {
       id: "claude",
@@ -213,6 +300,140 @@ function codexProvider() {
   }
 }
 
+function extraWindowValues(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).map(([name, window]) => ({ name, ...(window ?? {}) }));
+}
+
+// CodexBar 공통 JSON을 Charge의 두 기본 창 + 추가 창 구조로 변환한다.
+// 원본 identity는 절대 반환하지 않고 계정 식별값의 짧은 해시만 보낸다.
+function codexBarEntryToProvider(entry) {
+  if (!entry || entry.error || typeof entry !== "object") return null;
+  const id = textValue(entry.provider, entry.id)?.toLowerCase();
+  if (!id || id === "claude" || id === "codex") return null;
+
+  const usage = entry.usage && typeof entry.usage === "object" ? entry.usage : entry;
+  const identity = usage.identity && typeof usage.identity === "object"
+    ? usage.identity
+    : entry.identity && typeof entry.identity === "object" ? entry.identity : {};
+  const slots = ["primary", "secondary", "tertiary"]
+    .map((slot) => ({ slot, value: usage[slot] ?? entry[slot] }))
+    .filter(({ value }) => value && typeof value === "object");
+  const durationCounts = new Map();
+  for (const { value } of slots) {
+    const minutes = Number(value.windowMinutes ?? value.window_minutes ?? value.durationMinutes);
+    if (Number.isFinite(minutes)) durationCounts.set(minutes, (durationCounts.get(minutes) ?? 0) + 1);
+  }
+  const normalizedWindows = slots
+    .map(({ slot, value }) => {
+      const minutes = Number(value.windowMinutes ?? value.window_minutes ?? value.durationMinutes);
+      return {
+        slot,
+        window: normalizeRateWindow(value, slot, (durationCounts.get(minutes) ?? 0) > 1),
+      };
+    })
+    .filter(({ window }) => window);
+  const primary = normalizedWindows.find(({ slot }) => slot === "primary")?.window ?? null;
+  const secondary = normalizedWindows.find(({ slot }) => slot === "secondary")?.window ?? null;
+
+  const extras = normalizedWindows
+    .filter(({ slot }) => slot === "tertiary")
+    .map(({ window }) => ({ name: window.label, window }));
+  const rawExtras = extraWindowValues(usage.extraRateWindows ?? entry.extraRateWindows);
+  rawExtras.forEach((raw, index) => {
+    const value = raw.window && typeof raw.window === "object" ? raw.window : raw;
+    const label = explicitWindowLabel(raw)
+      ?? explicitWindowLabel(value)
+      ?? `Limit ${index + normalizedWindows.length + 1}`;
+    const window = normalizeRateWindow(value, "limit", false, label);
+    if (window) extras.push({ name: label, window });
+  });
+
+  if (!primary && !secondary && extras.length === 0) return null;
+  const rawAccount = textValue(
+    identity.accountEmail,
+    identity.email,
+    usage.accountEmail,
+    entry.accountEmail,
+    identity.accountId,
+    usage.accountId,
+    identity.accountOrganization,
+    usage.accountOrganization
+  );
+  const plan = usefulPlan(
+    usage.plan,
+    identity.plan,
+    usage.subscription,
+    identity.subscription,
+    usage.loginMethod,
+    identity.loginMethod
+  );
+
+  return {
+    id,
+    name: textValue(entry.displayName, entry.providerName, usage.providerName) ?? PROVIDER_NAMES[id] ?? titleCaseProvider(id),
+    plan,
+    account: accountHash(rawAccount),
+    session: primary,
+    weekly: secondary,
+    extras: extras.length ? extras : null,
+    status: null,
+    collector_source: "codexbar",
+  };
+}
+
+function parseCodexBarJSON(raw) {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    const start = text.indexOf("[");
+    const end = text.lastIndexOf("]");
+    if (start < 0 || end <= start) return null;
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      return null;
+    }
+  }
+}
+
+function collectCodexBarProviders() {
+  if (process.env.CHARGE_DISABLE_CODEXBAR === "1") return { providers: [], complete: false };
+  const cli = process.env.CHARGE_CODEXBAR_CLI
+    ?? (!WIN && fs.existsSync(DEFAULT_CODEXBAR_CLI) ? DEFAULT_CODEXBAR_CLI : null);
+  if (!cli) return { providers: [], complete: false };
+
+  let raw = "";
+  let commandSucceeded = true;
+  try {
+    raw = run(cli, ["usage", "--format", "json"], 90_000);
+  } catch (e) {
+    commandSucceeded = false;
+    raw = e.stdout?.toString?.() ?? "";
+    if (!raw.trim()) {
+      console.error(`CodexBar 프로바이더 수집 실패: ${e.message ?? e}`);
+      return { providers: [], complete: false };
+    }
+  }
+
+  const entries = parseCodexBarJSON(raw);
+  if (!entries) {
+    console.error("CodexBar 프로바이더 수집 실패: JSON 출력을 해석할 수 없습니다.");
+    return { providers: [], complete: false };
+  }
+  const bridgeEntries = entries.filter((entry) => !["claude", "codex"].includes(entry?.provider));
+  const providers = bridgeEntries.map(codexBarEntryToProvider).filter(Boolean);
+  const complete = commandSucceeded && !bridgeEntries.some((entry) => entry?.error);
+  for (const entry of bridgeEntries.filter((item) => item?.error)) {
+    console.error(`CodexBar ${entry.provider ?? "프로바이더"} 수집 실패: ${entry.error.message ?? "알 수 없는 오류"}`);
+  }
+  return { providers, complete };
+}
+
 // 프로바이더 상태 페이지 (Statuspage 공용 API)
 async function statusOf(url) {
   try {
@@ -226,15 +447,22 @@ async function statusOf(url) {
 }
 
 async function collectProviders() {
-  const [claude, codex, claudeStatus, codexStatus] = await Promise.all([
-    claudeProvider(),
-    Promise.resolve(codexProvider()),
-    statusOf("https://status.anthropic.com/api/v2/status.json"),
-    statusOf("https://status.openai.com/api/v2/status.json"),
+  const claudePromise = claudeProvider();
+  const claudeStatusPromise = statusOf("https://status.anthropic.com/api/v2/status.json");
+  const codexStatusPromise = statusOf("https://status.openai.com/api/v2/status.json");
+  const codex = codexProvider();
+  const codexBar = collectCodexBarProviders();
+  const [claude, claudeStatus, codexStatus] = await Promise.all([
+    claudePromise,
+    claudeStatusPromise,
+    codexStatusPromise,
   ]);
   if (claude) claude.status = claudeStatus;
   if (codex) codex.status = codexStatus;
-  return [claude, codex].filter(Boolean);
+  return {
+    providers: [claude, codex, ...codexBar.providers].filter(Boolean),
+    codexBarComplete: codexBar.complete,
+  };
 }
 
 // 업로드 설정 — 우선순위: CHARGE_* 환경변수(테스트용) → ~/.charge/config.json(페어링)
@@ -265,7 +493,7 @@ async function pairedUpload(mode, daily, live, providers) {
   if (!res.ok) throw new Error(`업로드 실패 (${res.status}): ${await res.text()}`);
 }
 
-(async () => {
+async function main() {
   // 이전 성공 페이로드 캐시 — 일부 수집이 실패해도 그 부분만 이전 값으로 유지
   let cache = {};
   try {
@@ -285,10 +513,20 @@ async function pairedUpload(mode, daily, live, providers) {
     console.error(`live 수집 실패, 이전 값 유지: ${e.message ?? e}`);
     live = cache.live ?? null;
   }
-  providers = await collectProviders();
+  let providerCollection;
+  try {
+    providerCollection = await collectProviders();
+  } catch (e) {
+    console.error(`프로바이더 수집 실패, 이전 값 유지: ${e.message ?? e}`);
+    providerCollection = { providers: [], codexBarComplete: false };
+  }
+  providers = providerCollection.providers;
   // 일부 프로바이더만 실패해도 목록에서 사라지지 않게 이전 값으로 채운다 (앱 설정 토글 유지)
   for (const prev of cache.providers ?? []) {
-    if (!providers.some((p) => p.id === prev.id)) providers.push(prev);
+    if (providers.some((p) => p.id === prev.id)) continue;
+    // CodexBar가 정상 완료된 경우, 거기서 더 이상 반환하지 않는 항목은 사용자가 끈 것으로 본다.
+    if (providerCollection.codexBarComplete && prev.collector_source === "codexbar") continue;
+    providers.push(prev);
   }
   // 계정 식별 실패 시 마지막으로 알려진 계정 해시 유지 (계정 미상('')과 실제 계정 행이 갈라지는 것 방지)
   for (const p of providers) {
@@ -312,7 +550,25 @@ async function pairedUpload(mode, daily, live, providers) {
 
   fs.writeFileSync(CACHE_FILE, JSON.stringify({ daily, live, providers }));
   console.log(`[${now}] daily ${daily.length}행 + live + providers ${providers.length}개 업로드 완료`);
-})().catch((e) => {
-  console.error(e.message ?? e);
-  process.exit(1);
-});
+}
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e.message ?? e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  accountHash,
+  codexBarEntryToProvider,
+  collectCodexBarProviders,
+  dropExpired,
+  durationLabel,
+  normalizeRateWindow,
+  normalizeResetAt,
+  parseCodexBarJSON,
+  resolveMode,
+  titleCaseProvider,
+  usefulPlan,
+};
