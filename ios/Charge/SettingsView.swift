@@ -85,11 +85,6 @@ struct SettingsView: View {
                     LabeledContent("버전", value: "1.0")
                     LabeledContent("이름의 뜻", value: "충전 + 청구")
                     Link("GitHub 저장소", destination: URL(string: "https://github.com/baekdusan/charge")!)
-                    Button("설치 가이드 다시 보기") {
-                        ChargeConfig.gistRawURL = nil
-                        dismiss()
-                    }
-                    .foregroundStyle(.orange)
                 }
             }
             .navigationTitle("설정")

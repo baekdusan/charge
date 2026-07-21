@@ -10,7 +10,6 @@ struct ContentView: View {
     @State private var loading = false
     @State private var segment = "all"
     @State private var showSettings = false
-    @State private var showOnboarding = false
     @State private var hidden: Set<String> = []
     @AppStorage("warnThreshold") private var warnThreshold = 70.0
     @AppStorage("critThreshold") private var critThreshold = 90.0
@@ -53,28 +52,14 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showSettings, onDismiss: {
                 hidden = ChargeConfig.hiddenProviders
-                if ChargeConfig.gistRawURL == nil {
-                    showOnboarding = true
-                } else {
-                    Task { await load() }
-                }
+                Task { await load() }
             }) {
                 SettingsView(generatedAt: generatedAt, providers: providers)
-            }
-            .fullScreenCover(isPresented: $showOnboarding) {
-                OnboardingView {
-                    showOnboarding = false
-                    Task { await load() }
-                }
             }
             .refreshable { await load() }
             .task {
                 hidden = ChargeConfig.hiddenProviders
-                if ChargeConfig.gistRawURL == nil {
-                    showOnboarding = true
-                } else {
-                    await load()
-                }
+                await load()
             }
         }
         .preferredColorScheme(.dark)
@@ -373,6 +358,8 @@ struct ContentView: View {
                 generatedAt = f.date(from: g) ?? ISO8601DateFormatter().date(from: g)
             }
             error = nil
+        } catch ChargeError.notConfigured {
+            self.error = "오른쪽 위 ⚙️ 설정에서 Gist 주소를 입력해주세요."
         } catch {
             self.error = "불러오기 실패: \(error.localizedDescription)"
         }

@@ -9,10 +9,19 @@ enum ChargeConfig {
 
     static var gistRawURL: URL? {
         get {
-            guard let s = defaults.string(forKey: "gistRawURL"), !s.isEmpty else { return nil }
-            return URL(string: s)
+            if let s = defaults.string(forKey: "gistRawURL"), !s.isEmpty {
+                return URL(string: s)
+            }
+            return bundleDefault
         }
         set { defaults.set(newValue?.absoluteString ?? "", forKey: "gistRawURL") }
+    }
+
+    /// 번들에 DefaultGist.txt가 있으면 그 주소를 기본값으로 사용 (개인 빌드용, gitignore 대상)
+    private static var bundleDefault: URL? {
+        guard let p = Bundle.main.url(forResource: "DefaultGist", withExtension: "txt"),
+              let s = try? String(contentsOf: p, encoding: .utf8) else { return nil }
+        return URL(string: s.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// gist 페이지 URL / raw URL 어떤 형태를 붙여넣어도 raw URL로 정규화

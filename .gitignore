@@ -13,3 +13,6 @@ xcuserdata/
 DerivedData/
 node_modules/
 supabase/.temp/
+
+# 개인 기본 Gist 주소 (번들 리소스)
+ios/Shared/DefaultGist.txt

@@ -73,8 +73,8 @@ xcodegen generate
 open Charge.xcodeproj
 ```
 
-Xcode에서 `Charge`, `ChargeWidget` 두 타깃의 Signing 팀을 선택하고 기기에 Run 하세요.
-앱을 처음 열면 온보딩이 뜹니다 — 1단계에서 만든 Gist 주소(gist.github.com 페이지 주소 그대로)를 붙여넣으면 연결 끝.
+Xcode에서 기기에 Run 한 뒤, 앱 설정(⚙️)에서 1단계에서 만든 Gist 주소를 붙여넣으면 연결 끝.
+매번 입력하기 싫으면 `ios/Shared/DefaultGist.txt`에 raw URL을 적어두면 기본값으로 쓰입니다 (gitignore 대상).
 
 > App Group(`group.com.dusan.charge`)을 사용하므로 포크해서 쓸 때는 번들 ID와 그룹 ID를 자신의 팀에 맞게 `project.yml`에서 바꿔주세요.
 
