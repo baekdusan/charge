@@ -129,11 +129,13 @@ struct RateWindow: Codable {
     let percent: Double
     let resetsAt: String?
     let windowMinutes: Int?
+    let label: String?
 
-    init(percent: Double, resetsAt: String?, windowMinutes: Int? = nil) {
+    init(percent: Double, resetsAt: String?, windowMinutes: Int? = nil, label: String? = nil) {
         self.percent = percent
         self.resetsAt = resetsAt
         self.windowMinutes = windowMinutes
+        self.label = label
     }
 
     private static let isoFrac: ISO8601DateFormatter = {
@@ -168,7 +170,8 @@ struct RateWindow: Codable {
         let inferred = RateWindow(
             percent: 0,
             resetsAt: Self.isoFrac.string(from: nextReset),
-            windowMinutes: mins
+            windowMinutes: mins,
+            label: label
         )
         return RateWindowDisplayState(window: inferred, isEstimated: true)
     }

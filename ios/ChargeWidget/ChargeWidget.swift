@@ -35,7 +35,7 @@ struct UsageProvider: TimelineProvider {
                     blockProgress: payload.live?.windowProgress
                 )
             }
-            let next = Calendar.current.date(byAdding: .minute, value: 15, to: .now)!
+            let next = Calendar.current.date(byAdding: .minute, value: 5, to: .now)!
             completion(Timeline(entries: [entry], policy: .after(next)))
         }
     }

@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import WidgetKit
 
 struct ContentView: View {
     @State private var daily: [DailyUsage] = []
@@ -46,19 +47,19 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showSettings, onDismiss: {
                 hidden = ChargeConfig.hiddenProviders
-                Task { await load() }
+                Task { await load(reloadWidgets: true) }
             }) {
                 SettingsView(generatedAt: generatedAt, providers: providers)
             }
             // 손을 일찍 떼면 SwiftUI가 refreshable 태스크를 취소하므로,
             // 분리된 태스크로 실행해 실제 로드가 중간에 끊기지 않게 한다
-            .refreshable { await Task { await load() }.value }
+            .refreshable { await Task { await load(reloadWidgets: true) }.value }
             .task {
                 hidden = ChargeConfig.hiddenProviders
                 if ChargeAuth.session == nil {
                     showOnboarding = true
                 }
-                await load()
+                await load(reloadWidgets: true)
                 while !Task.isCancelled {
                     do {
                         try await Task.sleep(nanoseconds: 60_000_000_000)
@@ -73,7 +74,7 @@ struct ContentView: View {
             .fullScreenCover(isPresented: $showOnboarding) {
                 OnboardingView {
                     showOnboarding = false
-                    Task { await load() }
+                    Task { await load(reloadWidgets: true) }
                 }
             }
         }
@@ -268,8 +269,12 @@ struct ContentView: View {
     private func providerCard(_ p: Provider) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text(p.name)
-                    .font(.headline)
+                HStack(spacing: 6) {
+                    ProviderGlyph(providerId: p.id, name: p.name)
+                        .frame(width: 15, height: 15)
+                    Text(p.name)
+                        .font(.headline)
+                }
                 if let plan = p.plan {
                     Text(plan)
                         .font(.caption2.bold())
@@ -303,21 +308,21 @@ struct ContentView: View {
                     .foregroundStyle(.orange)
             }
             if let state = p.session?.displayState() {
-                gaugeRow(title: "Session", state: state)
+                gaugeRow(title: p.session?.label ?? String(localized: "Session"), state: state)
             }
             if let state = p.weekly?.displayState() {
-                gaugeRow(title: "Weekly", state: state)
+                gaugeRow(title: p.weekly?.label ?? String(localized: "Weekly"), state: state)
             }
             ForEach(p.extras ?? []) { e in
                 if let state = e.window.displayState() {
-                    gaugeRow(title: "\(e.name) weekly", state: state)
+                    gaugeRow(title: e.window.label ?? e.name, state: state)
                 }
             }
         }
         .cardStyle()
     }
 
-    private func gaugeRow(title: LocalizedStringKey, state: RateWindowDisplayState) -> some View {
+    private func gaugeRow(title: String, state: RateWindowDisplayState) -> some View {
         let window = state.window
 
         return VStack(alignment: .leading, spacing: 4) {
@@ -493,13 +498,18 @@ struct ContentView: View {
         .cardStyle()
     }
 
-    private func load() async {
+    private func load(reloadWidgets: Bool = false) async {
         // 이미 로드 중이면 끝날 때까지 기다렸다가 새로 로드한다 (풀 리프레시가 즉시 끝나 보이는 것 방지)
         while loading {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         loading = true
-        defer { loading = false }
+        defer {
+            loading = false
+            if reloadWidgets {
+                WidgetCenter.shared.reloadAllTimelines()
+            }
+        }
         do {
             let payload = try await ChargeAPI.fetchAll()
             daily = payload.daily

@@ -4,15 +4,38 @@ import AppIntents
 
 // MARK: - Widget configuration
 
-enum ProviderChoice: String, AppEnum {
-    case all, claude, codex
-
+/// 위젯 설정용 프로바이더 항목 — 실제로 수집된(활성) 프로바이더만 선택지로 노출된다
+struct ProviderEntity: AppEntity {
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "Provider"
-    static var caseDisplayRepresentations: [ProviderChoice: DisplayRepresentation] = [
-        .all: "All",
-        .claude: "Claude",
-        .codex: "Codex",
-    ]
+    static var defaultQuery = ProviderEntityQuery()
+
+    let id: String
+    let name: String
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "\(name)")
+    }
+}
+
+struct ProviderEntityQuery: EntityQuery {
+    private func activeEntities() async -> [ProviderEntity] {
+        let providers = await ChargeAPI.fetchAllOrCached()?.providers ?? []
+        var seen = Set<String>()
+        return providers.compactMap { p in
+            seen.insert(p.id).inserted ? ProviderEntity(id: p.id, name: p.name) : nil
+        }
+    }
+
+    func entities(for identifiers: [String]) async throws -> [ProviderEntity] {
+        let active = await activeEntities()
+        return identifiers.map { id in
+            active.first { $0.id == id } ?? ProviderEntity(id: id, name: id.capitalized)
+        }
+    }
+
+    func suggestedEntities() async throws -> [ProviderEntity] {
+        await activeEntities()
+    }
 }
 
 enum ProviderWidgetStyle {
@@ -23,19 +46,19 @@ enum ProviderWidgetStyle {
 }
 
 struct SelectProviderIntent: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource = "Choose Provider"
-    static var description = IntentDescription("Pick which AI provider to show.")
+    static var title: LocalizedStringResource = "Choose Providers"
+    static var description = IntentDescription("Pick which AI providers to show. Empty = all.")
 
-    @Parameter(title: "Provider", default: .all)
-    var provider: ProviderChoice
+    @Parameter(title: "Providers", default: [])
+    var providers: [ProviderEntity]
 }
 
 struct SelectLockProviderIntent: WidgetConfigurationIntent {
-    static var title: LocalizedStringResource = "Choose Provider"
-    static var description = IntentDescription("Pick which AI provider to show.")
+    static var title: LocalizedStringResource = "Choose Providers"
+    static var description = IntentDescription("Pick which AI providers to show. Empty = all.")
 
-    @Parameter(title: "Provider", default: .all)
-    var provider: ProviderChoice
+    @Parameter(title: "Providers", default: [])
+    var providers: [ProviderEntity]
 }
 
 // MARK: - Timeline
@@ -78,23 +101,20 @@ private var sampleProviders: [Provider] {
     ]
 }
 
-private func selectedProviders(_ providers: [Provider], choice: ProviderChoice) -> [Provider] {
+private func selectedProviders(_ providers: [Provider], selection: [ProviderEntity]) -> [Provider] {
     let visible = providers.filter { !ChargeConfig.isHidden($0.id) }
-    switch choice {
-    case .all:
-        return visible
-    default:
-        return visible.filter { $0.id == choice.rawValue }
-    }
+    guard !selection.isEmpty else { return visible }
+    let ids = Set(selection.map(\.id))
+    return visible.filter { ids.contains($0.id) }
 }
 
-private func loadProviders(choice: ProviderChoice) async -> [Provider] {
+private func loadProviders(selection: [ProviderEntity]) async -> [Provider] {
     guard let providers = await ChargeAPI.fetchAllOrCached()?.providers else { return [] }
-    return selectedProviders(providers, choice: choice)
+    return selectedProviders(providers, selection: selection)
 }
 
-private func providerTimeline(choice: ProviderChoice, style: ProviderWidgetStyle) async -> Timeline<ProviderEntry> {
-    let providers = await loadProviders(choice: choice)
+private func providerTimeline(selection: [ProviderEntity], style: ProviderWidgetStyle) async -> Timeline<ProviderEntry> {
+    let providers = await loadProviders(selection: selection)
     let entry = ProviderEntry(date: .now, providers: providers, style: style)
     return Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(5 * 60)))
 }
@@ -107,13 +127,13 @@ struct ProviderTimelineProvider: AppIntentTimelineProvider {
     func snapshot(for configuration: SelectProviderIntent, in context: Context) async -> ProviderEntry {
         ProviderEntry(
             date: .now,
-            providers: selectedProviders(sampleProviders, choice: configuration.provider),
+            providers: selectedProviders(sampleProviders, selection: configuration.providers),
             style: .bars
         )
     }
 
     func timeline(for configuration: SelectProviderIntent, in context: Context) async -> Timeline<ProviderEntry> {
-        await providerTimeline(choice: configuration.provider, style: .bars)
+        await providerTimeline(selection: configuration.providers, style: .bars)
     }
 }
 
@@ -127,13 +147,13 @@ struct LockProviderTimelineProvider: AppIntentTimelineProvider {
     func snapshot(for configuration: SelectLockProviderIntent, in context: Context) async -> ProviderEntry {
         ProviderEntry(
             date: .now,
-            providers: selectedProviders(sampleProviders, choice: configuration.provider),
+            providers: selectedProviders(sampleProviders, selection: configuration.providers),
             style: style
         )
     }
 
     func timeline(for configuration: SelectLockProviderIntent, in context: Context) async -> Timeline<ProviderEntry> {
-        await providerTimeline(choice: configuration.provider, style: style)
+        await providerTimeline(selection: configuration.providers, style: style)
     }
 }
 
@@ -188,29 +208,38 @@ private struct WidgetUsageGauge: View {
 }
 
 private struct ProviderBar: View {
-    let title: LocalizedStringKey
+    let title: String
     let window: RateWindow?
+    /// 스몰 위젯에 프로바이더가 하나뿐일 때 넓게 그리기 위한 확장 모드
+    var expanded = false
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             let state = window?.displayState(at: context.date)
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: expanded ? 3 : 1) {
                 HStack(spacing: 4) {
                     Text(title)
-                        .font(.caption2)
+                        .font(expanded ? Font.caption : Font.caption2)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 4)
                     if let state {
                         Text("\(Int(state.window.percent))%")
-                            .font(.caption2.monospacedDigit().bold())
+                            .font((expanded ? Font.caption : Font.caption2).monospacedDigit().bold())
                     }
                 }
                 WidgetUsageGauge(
                     state: state,
                     tint: gaugeTint(state?.window.percent ?? 0),
                     track: .white.opacity(0.14),
-                    marker: .white.opacity(0.92)
+                    marker: .white.opacity(0.92),
+                    barHeight: expanded ? 6 : 4,
+                    markerHeight: expanded ? 12 : 9
                 )
+                if expanded, let reset = state?.window.resetShort {
+                    Text("Resets in \(reset)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
             .opacity(state?.isEstimated == true ? 0.62 : 1)
         }
@@ -219,13 +248,22 @@ private struct ProviderBar: View {
 
 private struct ProviderColumn: View {
     let provider: Provider
+    /// 한 칸에 프로바이더가 여럿이면 이름을 생략하고 마크만 표시한다 (이름 잘림 방지 — 마크로 충분히 구분됨)
+    var showName = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(provider.name)
-                    .font(.subheadline.bold())
-                    .lineLimit(1)
+                HStack(spacing: 5) {
+                    ProviderGlyph(providerId: provider.id, name: provider.name)
+                        .frame(width: 13, height: 13)
+                    if showName {
+                        Text(provider.name)
+                            .font(.subheadline.bold())
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                    }
+                }
                 Spacer(minLength: 4)
                 if let plan = provider.plan, !plan.isEmpty {
                     Text(plan)
@@ -235,8 +273,14 @@ private struct ProviderColumn: View {
                         .minimumScaleFactor(0.72)
                 }
             }
-            ProviderBar(title: "Session", window: provider.session)
-            ProviderBar(title: "Weekly", window: provider.weekly)
+            ProviderBar(
+                title: provider.session?.label ?? String(localized: "Session"),
+                window: provider.session
+            )
+            ProviderBar(
+                title: provider.weekly?.label ?? String(localized: "Weekly"),
+                window: provider.weekly
+            )
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -253,6 +297,14 @@ struct ProviderWidgetView: View {
             ($0.session?.displayState()?.window.percent ?? 0)
                 < ($1.session?.displayState()?.window.percent ?? 0)
         }
+    }
+
+    private func compactWindowLabel(_ window: RateWindow?, fallback: String) -> String {
+        guard let label = window?.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty else {
+            return fallback
+        }
+        let initials = label.split(separator: " ").prefix(2).compactMap(\.first)
+        return initials.isEmpty ? fallback : String(initials).uppercased()
     }
 
     var body: some View {
@@ -278,9 +330,41 @@ struct ProviderWidgetView: View {
                 Text("No data")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if let only = providers.first, providers.count == 1 {
+                // 하나뿐이면 위 절반만 쓰지 않고 위젯 전체를 채운다
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    HStack(spacing: 5) {
+                        ProviderGlyph(providerId: only.id, name: only.name)
+                            .frame(width: 15, height: 15)
+                        Text(only.name)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                    }
+                    Spacer(minLength: 4)
+                    if let plan = only.plan, !plan.isEmpty {
+                        Text(plan)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                    }
+                }
+                Spacer(minLength: 2)
+                ProviderBar(
+                    title: only.session?.label ?? String(localized: "Session"),
+                    window: only.session,
+                    expanded: true
+                )
+                Spacer(minLength: 2)
+                ProviderBar(
+                    title: only.weekly?.label ?? String(localized: "Weekly"),
+                    window: only.weekly,
+                    expanded: true
+                )
             } else {
                 ForEach(providers, id: \.uid) { provider in
-                    ProviderColumn(provider: provider)
+                    ProviderColumn(provider: provider, showName: false)
                 }
             }
             Spacer(minLength: 0)
@@ -300,7 +384,7 @@ struct ProviderWidgetView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(providers, id: \.uid) { provider in
-                    ProviderColumn(provider: provider)
+                    ProviderColumn(provider: provider, showName: providers.count == 1)
                 }
             }
         }
@@ -317,11 +401,10 @@ struct ProviderWidgetView: View {
 
         switch entry.style {
         case .number:
-            VStack(spacing: 0) {
-                Text(String((mostUrgent?.name ?? "-").prefix(6)))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            // CodexBar 스타일: 프로바이더 마크 + 큰 퍼센트
+            VStack(spacing: 2) {
+                ProviderGlyph(providerId: mostUrgent?.id ?? "", name: mostUrgent?.name ?? "-")
+                    .frame(width: 18, height: 18)
                 Text("\(estimatePrefix)\(percent)%")
                     .font(.system(.title3, design: .rounded).bold())
                     .minimumScaleFactor(0.55)
@@ -330,7 +413,8 @@ struct ProviderWidgetView: View {
             .containerBackground(.fill.tertiary, for: .widget)
         default:
             Gauge(value: min(state?.window.percent ?? 0, 100), in: 0...100) {
-                Text(String((mostUrgent?.name ?? "-").prefix(2)))
+                ProviderGlyph(providerId: mostUrgent?.id ?? "", name: mostUrgent?.name ?? "-")
+                    .frame(width: 12, height: 12)
             } currentValueLabel: {
                 Text("\(estimatePrefix)\(percent)%")
                     .font(.system(.body, design: .rounded).bold())
@@ -361,6 +445,8 @@ struct ProviderWidgetView: View {
                     let state = provider.session?.displayState()
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 6) {
+                            ProviderGlyph(providerId: provider.id, name: provider.name)
+                                .frame(width: 11, height: 11)
                             Text(provider.name)
                                 .font(.caption2.bold())
                                 .lineLimit(1)
@@ -393,9 +479,13 @@ struct ProviderWidgetView: View {
         return VStack(alignment: .leading, spacing: 2) {
             if let provider {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Text(provider.name)
-                        .font(.caption.bold())
-                        .lineLimit(1)
+                    HStack(spacing: 4) {
+                        ProviderGlyph(providerId: provider.id, name: provider.name)
+                            .frame(width: 12, height: 12)
+                        Text(provider.name)
+                            .font(.caption.bold())
+                            .lineLimit(1)
+                    }
                     Spacer(minLength: 3)
                     if let plan = provider.plan, !plan.isEmpty {
                         Text(plan)
@@ -405,14 +495,14 @@ struct ProviderWidgetView: View {
                     }
                 }
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("S")
+                    Text(compactWindowLabel(provider.session, fallback: "S"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Text("\(Int(session?.window.percent ?? 0))%")
                         .font(.system(.title3, design: .rounded).bold().monospacedDigit())
                         .opacity(session?.isEstimated == true ? 0.58 : 1)
                     Spacer(minLength: 8)
-                    Text("W")
+                    Text(compactWindowLabel(provider.weekly, fallback: "W"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     Text("\(Int(weekly?.window.percent ?? 0))%")

@@ -110,10 +110,14 @@ struct SettingsView: View {
                     Button("Setup guide") { showGuide = true }
                 }
 
-                Section("About") {
+                Section {
                     LabeledContent("Version", value: "1.0")
                     LabeledContent("Name", value: "charge = battery + billing")
                     Link("GitHub repository", destination: URL(string: "https://github.com/baekdusan/charge")!)
+                } header: {
+                    Text("About")
+                } footer: {
+                    Text("Not affiliated with Anthropic, OpenAI, or any AI provider. Their marks identify data sources only.")
                 }
             }
             .navigationTitle("Settings")
