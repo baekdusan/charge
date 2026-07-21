@@ -85,6 +85,11 @@ struct ChargeWidgetBundle: WidgetBundle {
     var body: some Widget {
         ChargeWidget()
         ProviderWidget()
+        ProviderRingLockWidget()
+        ProviderNumberLockWidget()
+        ProviderBarsLockWidget()
+        ProviderSummaryLockWidget()
+        ProviderInlineLockWidget()
     }
 }
 
