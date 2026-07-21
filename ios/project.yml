@@ -28,6 +28,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.dusan.charge
         TARGETED_DEVICE_FAMILY: "1"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    entitlements:
+      path: Charge/Charge.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.dusan.charge
     dependencies:
       - target: ChargeWidget
     scheme:
@@ -49,3 +54,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.dusan.charge.widget
         SKIP_INSTALL: YES
+    entitlements:
+      path: ChargeWidget/ChargeWidget.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.dusan.charge

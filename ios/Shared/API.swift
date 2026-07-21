@@ -7,11 +7,22 @@ struct UsagePayload: Codable {
     let providers: [Provider]?
 }
 
+enum ChargeError: LocalizedError {
+    case notConfigured
+
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured: return "데이터 소스(Gist URL)가 설정되지 않았습니다."
+        }
+    }
+}
+
 // 데이터 계층 추상화 — Supabase 등으로 백엔드를 바꿀 땐 이 파일만 교체한다.
 enum ChargeAPI {
     static func fetchAll() async throws -> UsagePayload {
+        guard let base = ChargeConfig.gistRawURL else { throw ChargeError.notConfigured }
         // 쿼리 파라미터로 CDN 캐시를 우회해 항상 최신 리비전을 받는다
-        var comps = URLComponents(url: Secrets.gistRawURL, resolvingAgainstBaseURL: false)!
+        var comps = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         comps.queryItems = [URLQueryItem(name: "t", value: String(Int(Date().timeIntervalSince1970)))]
         let (data, resp) = try await URLSession.shared.data(from: comps.url!)
         guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {

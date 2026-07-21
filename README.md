@@ -16,8 +16,10 @@ Charge는 데스크톱의 사용량 데이터를 가벼운 수집기로 모아 *
 - **세그먼트 필터** — 전체 / Claude / Codex 를 나눠서 보기
 - **현재 5시간 블록** — 실시간 비용, 시간당 소진율($/h), 창 종료 시점 예상 총액
 - **프로바이더 상태 배지** — Anthropic / OpenAI 상태 페이지 인시던트 표시
+- **스트릭 잔디** — GitHub 잔디 스타일의 최근 70일 히트맵 (그날 쓴 비용만큼 진해짐) + 연속 사용일 🔥
 - **홈 화면 위젯** — 프로바이더별 게이지 (스몰: 적층 / 미디엄: 2열, 프로바이더 선택 가능)
 - **잠금화면 위젯** — 1×1 고리형 게이지, 1×2 바형 게이지
+- **온보딩 & 설정** — 앱에서 Gist 주소만 붙여넣으면 연결 완료, 프로바이더 표시 켜고 끄기, 게이지 임계값 조정
 - **다크 테마** — 앱 아이콘과 통일된 네이비 그라데이션
 
 ## 아키텍처
@@ -66,15 +68,15 @@ node collect.js             # 첫 업로드
 ### 3. iOS 앱 빌드
 
 ```bash
-cp ios/Secrets.example.swift ios/Shared/Secrets.swift
-# Secrets.swift 에 자신의 Gist raw URL 입력
-
 cd ios
 xcodegen generate
 open Charge.xcodeproj
 ```
 
 Xcode에서 `Charge`, `ChargeWidget` 두 타깃의 Signing 팀을 선택하고 기기에 Run 하세요.
+앱을 처음 열면 온보딩이 뜹니다 — 1단계에서 만든 Gist 주소(gist.github.com 페이지 주소 그대로)를 붙여넣으면 연결 끝.
+
+> App Group(`group.com.dusan.charge`)을 사용하므로 포크해서 쓸 때는 번들 ID와 그룹 ID를 자신의 팀에 맞게 `project.yml`에서 바꿔주세요.
 
 ## 운영
 

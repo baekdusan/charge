@@ -55,9 +55,10 @@ struct ProviderTimelineProvider: AppIntentTimelineProvider {
     func timeline(for configuration: SelectProviderIntent, in context: Context) async -> Timeline<ProviderEntry> {
         var chosen: [Provider] = []
         if let all = try? await ChargeAPI.fetchAll().providers, !all.isEmpty {
+            let visible = all.filter { !ChargeConfig.isHidden($0.id) }
             switch configuration.provider {
-            case .all: chosen = all
-            default: chosen = all.filter { $0.id == configuration.provider.rawValue }
+            case .all: chosen = visible
+            default: chosen = visible.filter { $0.id == configuration.provider.rawValue }
             }
         }
         let next = Calendar.current.date(byAdding: .minute, value: 15, to: .now)!

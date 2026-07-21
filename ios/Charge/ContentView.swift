@@ -10,6 +10,8 @@ struct ContentView: View {
     @State private var loading = false
     @State private var segment = "all"
     @State private var showSettings = false
+    @State private var showOnboarding = false
+    @State private var hidden: Set<String> = []
     @AppStorage("warnThreshold") private var warnThreshold = 70.0
     @AppStorage("critThreshold") private var critThreshold = 90.0
     @AppStorage("chartDays") private var chartDays = 14
@@ -49,11 +51,31 @@ struct ContentView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showSettings) {
-                SettingsView(generatedAt: generatedAt)
+            .sheet(isPresented: $showSettings, onDismiss: {
+                hidden = ChargeConfig.hiddenProviders
+                if ChargeConfig.gistRawURL == nil {
+                    showOnboarding = true
+                } else {
+                    Task { await load() }
+                }
+            }) {
+                SettingsView(generatedAt: generatedAt, providers: providers)
+            }
+            .fullScreenCover(isPresented: $showOnboarding) {
+                OnboardingView {
+                    showOnboarding = false
+                    Task { await load() }
+                }
             }
             .refreshable { await load() }
-            .task { await load() }
+            .task {
+                hidden = ChargeConfig.hiddenProviders
+                if ChargeConfig.gistRawURL == nil {
+                    showOnboarding = true
+                } else {
+                    await load()
+                }
+            }
         }
         .preferredColorScheme(.dark)
         .tint(ChargeTheme.accent)
@@ -67,16 +89,17 @@ struct ContentView: View {
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if providers.count > 1 {
+            if visibleProviders.count > 1 {
                 Picker("프로바이더", selection: $segment) {
                     Text("전체").tag("all")
-                    ForEach(providers) { Text($0.name).tag($0.id) }
+                    ForEach(visibleProviders) { Text($0.name).tag($0.id) }
                 }
                 .pickerStyle(.segmented)
             }
             todayCard
-            ForEach(providers.filter { pid == nil || $0.id == pid }) { providerCard($0) }
+            ForEach(visibleProviders.filter { pid == nil || $0.id == pid }) { providerCard($0) }
             if let live, pid == nil || pid == "claude" { liveCard(live) }
+            streakCard
             chartCard
             if let today, !today.mergedModels.isEmpty {
                 modelCard(today)
@@ -113,6 +136,73 @@ struct ContentView: View {
 
     private func todayCost(of p: Provider) -> Double {
         today?.cost(for: p.id) ?? 0
+    }
+
+    private var visibleProviders: [Provider] {
+        providers.filter { !hidden.contains($0.id) }
+    }
+
+    // MARK: 스트릭 (잔디)
+
+    private var streak: Int {
+        let costByDay = Dictionary(uniqueKeysWithValues: daily.map { ($0.period, $0.totalCost) })
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        var count = 0
+        var cursor = Date()
+        // 오늘 기록이 없으면 어제부터 센다
+        if (costByDay[f.string(from: cursor)] ?? 0) <= 0 {
+            cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor)!
+        }
+        while (costByDay[f.string(from: cursor)] ?? 0) > 0 {
+            count += 1
+            cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor)!
+        }
+        return count
+    }
+
+    private var streakCard: some View {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        let costByDay = Dictionary(uniqueKeysWithValues: daily.map { ($0.period, $0.cost(for: pid)) })
+        let weeks = 10
+        let start = Calendar.current.date(byAdding: .day, value: -(weeks * 7 - 1), to: Date())!
+        let maxCost = max(costByDay.values.max() ?? 0, 0.01)
+        let todayRatio = (today?.cost(for: pid) ?? 0) / maxCost
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("스트릭")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("🔥 \(streak)일 연속")
+                    .font(.caption.bold())
+            }
+            HStack(alignment: .top, spacing: 4) {
+                ForEach(0..<weeks, id: \.self) { col in
+                    VStack(spacing: 4) {
+                        ForEach(0..<7, id: \.self) { row in
+                            let date = Calendar.current.date(byAdding: .day, value: col * 7 + row, to: start)!
+                            let cost = costByDay[f.string(from: date)] ?? 0
+                            let future = date > Date()
+                            RoundedRectangle(cornerRadius: 3)
+                                .fill(future ? .clear
+                                      : cost <= 0 ? Color.white.opacity(0.07)
+                                      : ChargeTheme.accent.opacity(max(0.18, cost / maxCost)))
+                                .frame(maxWidth: .infinity)
+                                .aspectRatio(1, contentMode: .fit)
+                        }
+                    }
+                }
+            }
+            if (today?.cost(for: pid) ?? 0) > 0 {
+                Text("오늘은 최근 \(weeks * 7)일 최고치의 \(Int(min(todayRatio, 1) * 100))%를 썼어요")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .cardStyle()
     }
 
     private func providerCard(_ p: Provider) -> some View {
