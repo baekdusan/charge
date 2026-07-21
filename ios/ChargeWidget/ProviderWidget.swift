@@ -333,21 +333,23 @@ struct ProviderWidgetView: View {
             } else if let only = providers.first, providers.count == 1 {
                 // 하나뿐이면 위 절반만 쓰지 않고 위젯 전체를 채운다
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    // 이름이 절대 잘리지 않게: 감싼 스택에 우선순위 + 고정폭, 플랜 쪽이 줄어든다
                     HStack(spacing: 5) {
                         ProviderGlyph(providerId: only.id, name: only.name)
                             .frame(width: 15, height: 15)
                         Text(only.name)
                             .font(.headline)
                             .lineLimit(1)
-                            .layoutPriority(1)
+                            .fixedSize(horizontal: true, vertical: false)
                     }
+                    .layoutPriority(1)
                     Spacer(minLength: 4)
                     if let plan = only.plan, !plan.isEmpty {
                         Text(plan)
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.72)
+                            .minimumScaleFactor(0.55)
                     }
                 }
                 Spacer(minLength: 2)
