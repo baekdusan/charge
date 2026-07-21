@@ -94,10 +94,22 @@ extension DailyUsage {
 struct Provider: Codable, Identifiable {
     let id: String
     let name: String
+    let plan: String?           // 구독 플랜 표시명 (예: "Max 20x", "Education")
     let session: RateWindow?
     let weekly: RateWindow?
     let extras: [ExtraWindow]?
     let status: ProviderStatus?
+    var account: String? = nil      // 계정 해시 — 머신마다 계정이 다르면 카드가 분리된다
+    var deviceLabel: String? = nil  // 이 계정을 마지막으로 보고한 머신 이름
+
+    /// 계정까지 포함한 고유 식별자 (같은 프로바이더의 계정별 카드 구분용)
+    var uid: String { "\(id)#\(account ?? "")" }
+
+    /// "Dusanui-MacBookPro.local" → "Dusanui-MacBookPro"
+    var deviceShortLabel: String? {
+        guard let l = deviceLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !l.isEmpty else { return nil }
+        return l.hasSuffix(".local") ? String(l.dropLast(6)) : l
+    }
 }
 
 struct ProviderStatus: Codable {
@@ -142,6 +154,25 @@ struct RateWindow: Codable {
         return d < Date()
     }
 
+    /// 마지막으로 알려진 리셋이 지난 경우, 다음 창을 0% 추정값으로 표시한다.
+    /// 실제 수집값이 도착하면 이 상태는 즉시 교체된다.
+    func displayState(at now: Date = Date()) -> RateWindowDisplayState? {
+        guard let end = resetDate, end <= now else {
+            return RateWindowDisplayState(window: self, isEstimated: false)
+        }
+        guard let mins = windowMinutes, mins > 0 else { return nil }
+
+        let duration = Double(mins) * 60
+        let completedWindows = floor(max(0, now.timeIntervalSince(end)) / duration) + 1
+        let nextReset = end.addingTimeInterval(completedWindows * duration)
+        let inferred = RateWindow(
+            percent: 0,
+            resetsAt: Self.isoFrac.string(from: nextReset),
+            windowMinutes: mins
+        )
+        return RateWindowDisplayState(window: inferred, isEstimated: true)
+    }
+
     /// "Resets in 4h 9m" 형태의 남은 시간 문자열
     var resetText: String? {
         guard let d = resetDate else { return nil }
@@ -158,6 +189,13 @@ struct RateWindow: Codable {
         if day > 0 { return "\(day)d \(h)h" }
         if h > 0 { return "\(h)h \(m)m" }
         return "\(m)m"
+    }
+
+    /// 창 경과율 0...1 — 시간 진행 막대용. 창 길이를 모르면 nil.
+    var timeProgress: Double? {
+        guard let mins = windowMinutes, mins > 0, let end = resetDate else { return nil }
+        let duration = Double(mins) * 60
+        return min(1, max(0, 1 - end.timeIntervalSinceNow / duration))
     }
 
     /// 페이스 배율: 사용률 ÷ 창 경과율. 1보다 크면 리셋 전 한도 소진 페이스.
@@ -183,10 +221,27 @@ struct RateWindow: Codable {
     }
 }
 
-struct LiveRow: Codable {
-    let id: Int
-    let activeBlock: ActiveBlock?
-    let updatedAt: String
+struct RateWindowDisplayState {
+    let window: RateWindow
+    let isEstimated: Bool
+}
+
+struct CollectorDevice: Codable, Identifiable {
+    let id: String
+    let label: String?
+    let lastSeenAt: String?
+
+    private static let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let iso = ISO8601DateFormatter()
+
+    var lastSeenDate: Date? {
+        guard let lastSeenAt else { return nil }
+        return Self.isoFrac.date(from: lastSeenAt) ?? Self.iso.date(from: lastSeenAt)
+    }
 }
 
 struct ActiveBlock: Codable {
