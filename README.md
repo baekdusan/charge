@@ -10,7 +10,9 @@ Charge는 데스크톱의 사용량 데이터를 가벼운 수집기로 모아 *
 
 ## 기능
 
-- **프로바이더별 레이트리밋 게이지** — Claude(세션 5h / 주간 / 모델별 주간), Codex(세션 / 주간), 리셋 카운트다운
+- **프로바이더별 레이트리밋 게이지** — Claude(세션 5h / 주간 / 모델별 주간), Codex(세션 / 주간), 리셋 카운트다운, 창 경과 시간 마커
+- **플랜 배지 & 계정 구분** — 구독 플랜(Max 20x, Education 등) 자동 감지, 머신마다 다른 계정을 쓰면 계정별 카드로 분리 + 머신 이름 표시
+- **PC 연결 상태** — 수집기가 살아 있는지, 어느 머신이 언제 마지막으로 보고했는지 상단에 표시
 - **페이스 예측** — 현재 소진 속도로 리셋 전에 한도에 도달할지 미리 경고 ("⚡ 이 속도면 4h 후 소진")
 - **비용 대시보드** — 오늘 / 7일 / 30일 비용·토큰, 일별 차트, 모델별 비용 순위
 - **세그먼트 필터** — 전체 / Claude / Codex 를 나눠서 보기
@@ -18,7 +20,7 @@ Charge는 데스크톱의 사용량 데이터를 가벼운 수집기로 모아 *
 - **프로바이더 상태 배지** — Anthropic / OpenAI 상태 페이지 인시던트 표시
 - **스트릭 잔디** — GitHub 잔디 스타일의 최근 70일 히트맵 (그날 쓴 비용만큼 진해짐) + 연속 사용일 🔥
 - **홈 화면 위젯** — 프로바이더별 게이지 (스몰: 적층 / 미디엄: 2열, 프로바이더 선택 가능)
-- **잠금화면 위젯** — 1×1 고리형 게이지, 1×2 바형 게이지
+- **잠금화면 위젯 5종** — 링 게이지 / 큰 숫자 / 막대(사용량+시간 마커) / 요약 / 인라인, 위젯별 프로바이더 선택
 - **온보딩 & 설정** — Apple 로그인 후 터미널 명령 한 줄이면 연결 완료, 프로바이더 표시 켜고 끄기, 게이지 임계값 조정
 - **다크 테마** — 앱 아이콘과 통일된 네이비 그라데이션
 
@@ -63,9 +65,12 @@ open Charge.xcodeproj
 
 | 작업 | 명령 |
 |------|------|
-| 수동 수집 | `node collector/collect.js` |
-| 수집기 로그 | `tail -f ~/Library/Logs/charge-collector.log` |
-| 수집기 해제 | `launchctl unload ~/Library/LaunchAgents/com.charge.collector.plist` |
+| 수동 수집 1회 | `npx charge-collector run` |
+| 수집기 로그 (macOS) | `tail -f ~/Library/Logs/charge-collector.log` |
+| 수집기 로그 (Windows) | `%USERPROFILE%\charge-collector.log` |
+| 수집기 해제 (macOS) | `launchctl unload ~/Library/LaunchAgents/com.charge.collector.plist` |
+| 수집기 해제 (Windows) | `Unregister-ScheduledTask -TaskName ChargeCollector` |
+| 페어링 해제 | `npx charge-collector unpair` |
 
 ## 여러 컴퓨터에서 쓰기
 
