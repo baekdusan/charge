@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showOnboarding = false
     @State private var hidden: Set<String> = []
+    /// 현재 providers/devices 페이로드를 조회하기 시작한 시점의 세션 세대
+    @State private var payloadEpoch = ChargeAuth.sessionEpoch
     @AppStorage("warnThreshold") private var warnThreshold = 70.0
     @AppStorage("critThreshold") private var critThreshold = 90.0
     @AppStorage("chartDays") private var chartDays = 14
@@ -49,7 +51,8 @@ struct ContentView: View {
                 hidden = ChargeConfig.hiddenProviders
                 Task { await load(reloadWidgets: true) }
             }) {
-                SettingsView(generatedAt: generatedAt, providers: providers)
+                SettingsView(generatedAt: generatedAt, providers: providers, devices: devices,
+                             snapshotEpoch: payloadEpoch)
             }
             // 손을 일찍 떼면 SwiftUI가 refreshable 태스크를 취소하므로,
             // 분리된 태스크로 실행해 실제 로드가 중간에 끊기지 않게 한다
@@ -68,12 +71,26 @@ struct ContentView: View {
                     }
                     if ChargeAuth.session != nil {
                         await load()
+                    } else if !showOnboarding {
+                        // 위젯 프로세스가 무효 세션을 감지해 로그아웃했을 수 있다 —
+                        // 앱도 이전 계정 데이터를 지우고 로그인 화면으로 유도한다
+                        daily = []
+                        live = nil
+                        providers = []
+                        devices = []
+                        generatedAt = nil
+                        error = String(localized: "Sign in to see your usage.")
+                        showOnboarding = true
                     }
                 }
             }
             .fullScreenCover(isPresented: $showOnboarding) {
-                OnboardingView {
+                // 첫 실행/재로그인: 이미 연결된 기기가 있으면 새 페어링 없이 바로 통과
+                OnboardingView(requiresNewDevice: false) {
                     showOnboarding = false
+                    // 로그아웃이 공유 저장소의 숨김 목록을 비웠으므로 로컬 상태도 다시 읽는다 —
+                    // 안 그러면 이전 계정에서 숨긴 id가 새 계정에서도 계속 숨는다
+                    hidden = ChargeConfig.hiddenProviders
                     Task { await load(reloadWidgets: true) }
                 }
             }
@@ -151,49 +168,26 @@ struct ContentView: View {
         visibleProviders.filter { $0.id == p.id }.count > 1
     }
 
-    private var latestDevice: CollectorDevice? {
-        devices.max {
-            ($0.lastSeenDate ?? .distantPast) < ($1.lastSeenDate ?? .distantPast)
-        }
+    /// last_seen이 갱신될 때마다 행이 뒤바뀌지 않게 이름 기준 고정 정렬
+    private var sortedDevices: [CollectorDevice] {
+        devices.sorted { ($0.shortLabel ?? "", $0.id) < ($1.shortLabel ?? "", $1.id) }
     }
 
     private func connectionStatus(at now: Date) -> some View {
-        let lastSeen = latestDevice?.lastSeenDate
-        let deviceName = latestDevice?.label?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let displayName = deviceName.flatMap { $0.isEmpty ? nil : $0 }
-            ?? String(localized: "Linked PC")
-        let hasPairedDevice = latestDevice != nil
-        let isTracking = lastSeen.map {
-            let age = now.timeIntervalSince($0)
-            return age >= -60 && age <= 12 * 60
-        } ?? false
-        let color: Color = loading ? .secondary : isTracking ? .green : hasPairedDevice ? .orange : .secondary
-        let title: LocalizedStringKey = loading
-            ? "Checking PC connection"
-            : isTracking
-                ? "PC tracking active"
-                : hasPairedDevice ? "Waiting for PC" : "No PC paired"
-
-        return HStack(spacing: 10) {
-            Circle()
-                .fill(color)
-                .frame(width: 9, height: 9)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                if let lastSeen {
-                    let relative = lastSeen.formatted(
-                        .relative(presentation: .numeric, unitsStyle: .abbreviated)
-                    )
-                    Text(verbatim: "\(displayName) · \(relative)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                } else if !loading {
-                    Text(displayName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 8) {
+                if devices.isEmpty {
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(Color.secondary)
+                            .frame(width: 9, height: 9)
+                        Text(loading ? "Checking PC connection" : "No PC paired")
+                            .font(.caption.weight(.semibold))
+                    }
+                } else {
+                    ForEach(sortedDevices) { device in
+                        deviceStatusRow(device, at: now)
+                    }
                 }
             }
             Spacer(minLength: 8)
@@ -204,6 +198,34 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+
+    private func deviceStatusRow(_ device: CollectorDevice, at now: Date) -> some View {
+        let isTracking = device.isTracking(at: now)
+        let displayName = device.shortLabel ?? String(localized: "Linked PC")
+        return HStack(spacing: 10) {
+            Circle()
+                .fill(isTracking ? Color.green : Color.orange)
+                .frame(width: 9, height: 9)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(isTracking ? "PC tracking active" : "Waiting for PC")
+                    .font(.caption.weight(.semibold))
+                if let lastSeen = device.lastSeenDate {
+                    let relative = lastSeen.formatted(
+                        .relative(presentation: .numeric, unitsStyle: .abbreviated)
+                    )
+                    Text(verbatim: "\(displayName) · \(relative)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else {
+                    Text(displayName)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
     }
 
     // MARK: 스트릭 (잔디)
@@ -511,12 +533,22 @@ struct ContentView: View {
             }
         }
         do {
+            // 로드 시작 시점의 세션 세대 — 로그아웃/재로그인을 건너온 응답인지 판별용
+            let epoch = ChargeAuth.sessionEpoch
             let payload = try await ChargeAPI.fetchAll()
             daily = payload.daily
             live = payload.live
             providers = payload.providers ?? []
             devices = payload.devices ?? []
+            payloadEpoch = epoch
             ChargeConfig.rememberProviders(providers)
+            // 숨긴 프로바이더는 알림도 받지 않는다 — 설정 시트가 떠 있는 동안 이 뷰의
+            // hidden 상태는 갱신되지 않으므로, 공유 저장소의 최신 숨김 목록으로 거른다
+            ResetNotifications.reschedule(
+                providers: providers.filter { !ChargeConfig.hiddenProviders.contains($0.id) },
+                warnThreshold: warnThreshold,
+                sessionEpoch: epoch
+            )
             // 선택 중인 세그먼트가 숨겨졌거나 사라졌으면 전체로 복귀
             if let pid, !visibleProviders.contains(where: { $0.id == pid }) {
                 segment = "all"
@@ -542,6 +574,15 @@ struct ContentView: View {
             // 위와 동일
         } catch {
             self.error = String(localized: "Failed to load: \(error.localizedDescription)")
+            // 캐시가 무효화된 상태(기기 삭제 직후 등)라면 화면의 이전 스냅샷도 함께 비운다 —
+            // 남겨두면 삭제된 컴퓨터의 사용량이 다음 성공 로드까지 계속 보인다
+            if !ChargeAPI.hasCache {
+                daily = []
+                live = nil
+                providers = []
+                devices = []
+                generatedAt = nil
+            }
         }
     }
 }

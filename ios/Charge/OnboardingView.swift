@@ -5,12 +5,18 @@ import AuthenticationServices
 struct OnboardingView: View {
     @State private var signedIn = ChargeAuth.session != nil
     @State private var pairingCode: String?
+    @State private var issuingCode = false
+    @State private var codeError: String?
     @State private var testing = false
     @State private var connectionCheckInFlight = false
+    @State private var lastCheckFailed = false
     @State private var message: String?
     /// 가이드를 연 시점의 디바이스 목록 — "새" 기기가 추가돼야만 연결 성공으로 판정한다
     /// (이미 데이터가 있는 계정이 두 번째 컴퓨터를 페어링할 때 기존 데이터로 즉시 닫히는 것 방지)
     @State private var baselineDeviceIDs: Set<String>?
+    /// 설정의 "다른 컴퓨터 페어링"은 true(새 기기 필수), 첫 실행 온보딩은 false —
+    /// 재로그인한 기존 계정은 이미 연결된 기기만으로 바로 통과해야 한다
+    var requiresNewDevice = true
     var onConnected: () -> Void
 
     var body: some View {
@@ -37,13 +43,24 @@ struct OnboardingView: View {
         .tint(ChargeTheme.accent)
         .task(id: signedIn) {
             guard signedIn else { return }
-            await captureBaseline()
+            // 기존 기기만으로 통과하는 모드에선 baseline이 쓰이지 않는다 — 조회 한 번을 아낀다
+            if requiresNewDevice { await captureBaseline() }
+            // 성공 폴링은 3초, 실패(네트워크·인증)가 이어지면 30초까지 백오프 —
+            // 죽은 세션으로 3초마다 refresh를 시도하면 Auth rate limit에 걸린다
+            var delaySeconds: Double = 3
             while !Task.isCancelled {
+                if ChargeAuth.session == nil {
+                    // 세션이 폐기됨(refresh 영구 실패) — 로그인 화면으로 복귀
+                    signedIn = false
+                    pairingCode = nil
+                    return
+                }
                 if await checkAccountData(showProgress: false, showFailure: false) {
                     return
                 }
+                delaySeconds = lastCheckFailed ? min(delaySeconds * 2, 30) : 3
                 do {
-                    try await Task.sleep(nanoseconds: 3_000_000_000)
+                    try await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
                 } catch {
                     return
                 }
@@ -87,6 +104,7 @@ struct OnboardingView: View {
             do {
                 try await ChargeAuth.signIn(appleIDToken: idToken)
                 message = nil
+                codeError = nil
                 signedIn = true
             } catch {
                 message = String(localized: "Sign in failed. Please try again.")
@@ -121,6 +139,13 @@ struct OnboardingView: View {
                         Button("New code") { Task { await issueCode() } }
                             .font(.caption.bold())
                     }
+                } else if let codeError {
+                    // 발급 실패 — 스피너를 계속 돌리지 않고 원인 + 재시도 버튼을 보여준다
+                    Text(codeError)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Button("Retry") { Task { await issueCode() } }
+                        .font(.caption.bold())
                 } else {
                     ProgressView()
                         .frame(maxWidth: .infinity)
@@ -156,6 +181,9 @@ struct OnboardingView: View {
                 ChargeAuth.signOut()
                 signedIn = false
                 pairingCode = nil
+                // 이전 시도의 에러가 남으면 재로그인 후 자동 코드 발급이 막힌다
+                codeError = nil
+                message = nil
             }
             .font(.footnote)
             .foregroundStyle(.secondary)
@@ -163,9 +191,18 @@ struct OnboardingView: View {
     }
 
     private func issueCode() async {
+        guard !issuingCode else { return }
+        issuingCode = true
+        codeError = nil
+        defer { issuingCode = false }
         pairingCode = try? await ChargeAuth.createPairingCode()
         if pairingCode == nil {
-            message = String(localized: "Sign in failed. Please try again.")
+            if ChargeAuth.session == nil {
+                // refresh 영구 실패로 세션이 지워짐 — 로그인 화면으로 복귀
+                signedIn = false
+            } else {
+                codeError = String(localized: "Couldn't get a code. Check your connection and retry.")
+            }
         }
     }
 
@@ -189,25 +226,36 @@ struct OnboardingView: View {
             if showProgress { testing = false }
         }
 
-        if baselineDeviceIDs == nil { await captureBaseline() }
-        guard let baseline = baselineDeviceIDs else {
+        if requiresNewDevice, baselineDeviceIDs == nil { await captureBaseline() }
+        if requiresNewDevice, baselineDeviceIDs == nil {
+            lastCheckFailed = true
             if showFailure {
                 message = String(localized: "No data yet — run the command above, wait a moment, and try again.")
             }
             return false
         }
-        if let payload = try? await ChargeAPI.fetchAll(),
-           let devices = payload.devices,
-           devices.contains(where: { !baseline.contains($0.id) }) {
-            message = nil
-            onConnected()
-            return true
-        } else {
+        do {
+            let devices = try await ChargeAPI.fetchAll().devices ?? []
+            lastCheckFailed = false
+            let baseline = baselineDeviceIDs ?? []
+            let connected = requiresNewDevice
+                ? devices.contains { !baseline.contains($0.id) }
+                : !devices.isEmpty
+            if connected {
+                message = nil
+                onConnected()
+                return true
+            }
             if showFailure {
                 message = String(localized: "No data yet — run the command above, wait a moment, and try again.")
             }
-            return false
+        } catch {
+            lastCheckFailed = true
+            if showFailure {
+                message = String(localized: "Couldn't reach the server. Check your connection and try again.")
+            }
         }
+        return false
     }
 }
 
