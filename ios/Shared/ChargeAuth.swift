@@ -19,28 +19,81 @@ enum ChargeAuth {
         return (url, lines[1])
     }()
 
+    /// 세션 저장 파일 (App Group 컨테이너) — UserDefaults는 프로세스 간 전파가 비동기라
+    /// refresh 잠금을 잡은 직후의 재확인 읽기가 낡은 토큰을 볼 수 있다. 파일은 원자적으로
+    /// 쓰고 항상 디스크에서 읽으므로 잠금과 같은 경계 안에서 최신 값이 보장된다.
+    private static var sessionFileURL: URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: ChargeConfig.suite)?
+            .appendingPathComponent("session.json")
+    }
+
     /// 앱·위젯이 공유하는 세션 (App Group)
     static var session: ChargeSession? {
         get {
+            if let url = sessionFileURL, let data = try? Data(contentsOf: url) {
+                return try? JSONDecoder().decode(ChargeSession.self, from: data)
+            }
+            // 구버전 저장 위치(UserDefaults)에서 읽기 — 다음 저장 때 파일로 이행된다
             guard let data = ChargeConfig.defaults.data(forKey: "cloudSession") else { return nil }
             return try? JSONDecoder().decode(ChargeSession.self, from: data)
         }
         set {
             if let newValue, let data = try? JSONEncoder().encode(newValue) {
-                ChargeConfig.defaults.set(data, forKey: "cloudSession")
+                if let url = sessionFileURL {
+                    try? data.write(to: url, options: .atomic)
+                    ChargeConfig.defaults.removeObject(forKey: "cloudSession")
+                } else {
+                    ChargeConfig.defaults.set(data, forKey: "cloudSession")
+                }
             } else {
+                // 삭제 대신 빈 파일을 원자적으로 쓴다 — 파일이 없으면 getter가 구버전
+                // UserDefaults로 폴백하는데, defaults 키 제거는 프로세스 간 전파가 비동기라
+                // 위젯이 로그아웃 직후에도 낡은 세션을 읽을 수 있다
+                if let url = sessionFileURL { try? Data().write(to: url, options: .atomic) }
                 ChargeConfig.defaults.removeObject(forKey: "cloudSession")
             }
         }
     }
 
+    /// 로그아웃마다 1씩 증가 — 토큰 회전(같은 계정)과 달리 계정 경계가 바뀔 때만 변한다.
+    /// 로그아웃 전에 시작된 로드가 늦게 도착해 이전 계정의 알림을 예약하는 것을 막는 데 쓴다.
+    static var sessionEpoch: Int { ChargeConfig.defaults.integer(forKey: "sessionEpoch") }
+
+    /// 세션 파일 쓰기 전용 짧은 잠금 — refresh의 "비교 후 저장"과 로그아웃/로그인의 쓰기가
+    /// 원자적으로 배타되게 한다. 보유 시간은 파일 쓰기 순간뿐이라 블로킹 잠금이어도 무해하다.
+    /// (refresh 전체를 감싸는 .refresh-lock과 별개 — 그쪽은 네트워크 왕복 동안 유지된다)
+    @discardableResult
+    static func withSessionWriteLock<T>(_ body: () -> T) -> T {
+        guard let dir = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: ChargeConfig.suite) else {
+            return body()
+        }
+        let fd = open(dir.appendingPathComponent(".session-write-lock").path, O_CREAT | O_RDWR, 0o600)
+        guard fd >= 0 else { return body() }
+        defer { close(fd) }
+        flock(fd, LOCK_EX)
+        defer { flock(fd, LOCK_UN) }
+        return body()
+    }
+
     /// 세션과 함께 계정에 귀속된 로컬 데이터를 모두 지운다
     /// (캐시가 남으면 위젯이 이전 계정의 사용량을 계속 보여준다)
     static func signOut() {
-        session = nil
+        withSessionWriteLock { session = nil }
+        finishSignOut()
+    }
+
+    /// 세션이 이미 (잠금 안에서) 지워진 뒤의 나머지 정리 — refresh 실패 경로와 공용
+    private static func finishSignOut() {
+        ChargeConfig.defaults.set(sessionEpoch + 1, forKey: "sessionEpoch")
         ChargeAPI.clearCache()
         ChargeConfig.defaults.removeObject(forKey: "knownProviders")
         ChargeConfig.defaults.removeObject(forKey: "hiddenProviders")
+        // 예약된 리셋 알림·프로바이더별 뮤트도 함께 제거 — 남겨두면 로그아웃 후
+        // 이전 계정의 알림이 울리거나, 다음 계정에서 같은 id가 소리 없이 뮤트된다
+        Task { @MainActor in ResetNotifications.cancelAll() }
+        ResetNotifications.mutedProviders = []
         WidgetCenter.shared.reloadAllTimelines()
     }
 
@@ -48,17 +101,99 @@ enum ChargeAuth {
     static func signIn(appleIDToken: String) async throws {
         guard let cloud else { throw ChargeError.notConfigured }
         let body = ["provider": "apple", "id_token": appleIDToken]
-        session = try await tokenRequest(cloud, grantType: "id_token", body: body)
+        let newSession = try await tokenRequest(cloud, grantType: "id_token", body: body)
+        withSessionWriteLock { session = newSession }
     }
 
-    /// 유효한 access token 반환 — 만료 임박이면 refresh
+    /// 유효한 access token 반환 — 만료 임박이면 refresh.
+    /// refresh token이 무효(폐기·회전 충돌)면 세션을 지운다 — 죽은 세션으로
+    /// 갱신을 반복하면 Auth 엔드포인트 rate limit에 걸려 재로그인까지 막힌다.
     static func validAccessToken() async throws -> String {
         guard let cloud, let s = session else { throw ChargeError.notConfigured }
         if s.expiresAt > Date().addingTimeInterval(60) { return s.accessToken }
-        let refreshed = try await tokenRequest(cloud, grantType: "refresh_token",
-                                               body: ["refresh_token": s.refreshToken])
-        session = refreshed
-        return refreshed.accessToken
+        return try await sharedRefresh(cloud).accessToken
+    }
+
+    /// 진행 중인 refresh — 같은 프로세스의 동시 호출은 하나의 요청을 공유한다.
+    /// 각자 refresh하면 Supabase의 토큰 회전 때문에 늦게 실패한 쪽이
+    /// 방금 발급된 유효 세션을 지워버릴 수 있다.
+    @MainActor private static var inflightRefresh: Task<ChargeSession, Error>?
+
+    @MainActor
+    private static func sharedRefresh(_ cloud: (url: URL, anon: String)) async throws -> ChargeSession {
+        if let inflight = inflightRefresh { return try await inflight.value }
+        let task = Task<ChargeSession, Error> {
+            try await withRefreshLock {
+                // 잠금을 기다리는 사이 (같은 프로세스든 다른 프로세스든) 갱신이 끝났을 수 있다
+                if let current = session, current.expiresAt > Date().addingTimeInterval(60) { return current }
+                guard let stale = session else { throw ChargeError.notConfigured }
+                do {
+                    let refreshed = try await tokenRequest(cloud, grantType: "refresh_token",
+                                                           body: ["refresh_token": stale.refreshToken])
+                    // 갱신 중 로그아웃/계정 전환이 있었으면 결과를 버린다 — 비교와 저장을
+                    // 세션 쓰기 잠금 안에서 함께 해 다른 프로세스의 로그아웃 쓰기와 원자적으로 배타한다
+                    let stored = withSessionWriteLock { () -> Bool in
+                        guard session?.refreshToken == stale.refreshToken else { return false }
+                        session = refreshed
+                        return true
+                    }
+                    guard stored else { throw ChargeError.notConfigured }
+                    return refreshed
+                } catch let e as URLError where e.code == .userAuthenticationRequired {
+                    // 로그아웃됐으면 아무것도 하지 않고, 로그인이 세션을 교체했다면 그쪽을 신뢰한다.
+                    // 비교와 삭제도 쓰기 잠금 안에서 원자적으로 — 잠금 없이 signOut()을 부르면
+                    // 그 사이 완료된 로그인의 새 세션을 지워버릴 수 있다.
+                    enum InvalidTokenOutcome {
+                        case alreadySignedOut
+                        case replaced(ChargeSession)
+                        case clearedOurs
+                    }
+                    let outcome = withSessionWriteLock { () -> InvalidTokenOutcome in
+                        guard let current = session else { return .alreadySignedOut }
+                        if current.refreshToken != stale.refreshToken { return .replaced(current) }
+                        session = nil
+                        return .clearedOurs
+                    }
+                    switch outcome {
+                    case .replaced(let current):
+                        return current
+                    case .alreadySignedOut:
+                        throw ChargeError.notConfigured
+                    case .clearedOurs:
+                        finishSignOut()
+                        throw ChargeError.notConfigured
+                    }
+                }
+            }
+        }
+        inflightRefresh = task
+        defer { inflightRefresh = nil }
+        return try await task.value
+    }
+
+    /// 앱·위젯이 서로 다른 프로세스에서 동시에 refresh하지 않도록 App Group 파일 잠금으로 직렬화.
+    /// Supabase는 refresh token을 1회용으로 회전시키므로, 동시 갱신은 늦게 도착한 쪽이
+    /// 세션 계열 전체를 폐기시킬 수 있다. 잠금을 얻은 뒤에는 다른 프로세스가 이미 갱신을
+    /// 끝냈는지 저장소를 다시 읽어 확인한다.
+    private static func withRefreshLock<T>(_ body: () async throws -> T) async throws -> T {
+        guard let dir = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: ChargeConfig.suite) else {
+            return try await body()
+        }
+        let fd = open(dir.appendingPathComponent(".refresh-lock").path, O_CREAT | O_RDWR, 0o600)
+        guard fd >= 0 else { return try await body() }
+        defer { close(fd) }
+        // 다른 프로세스가 refresh 중이면 끝날 때까지 짧게 재시도 (논블로킹 — 스레드를 잡지 않는다).
+        // 잠금 보유 프로세스가 백그라운드로 정지되면 잠금이 풀리지 않을 수 있으므로
+        // 최대 10초까지만 기다리고 일시 오류로 처리한다 — 호출자(위젯)는 캐시로 폴백한다.
+        var attempts = 0
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            attempts += 1
+            guard attempts < 50 else { throw URLError(.timedOut) }
+            try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        defer { flock(fd, LOCK_UN) }
+        return try await body()
     }
 
     /// 수집기 페어링 코드 발급 (10분 유효, 일회용)
@@ -101,8 +236,14 @@ enum ChargeAuth {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try JSONEncoder().encode(body)
         let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.userAuthenticationRequired)
+        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard http.statusCode == 200 else {
+            // 400/401/403 = 자격증명 자체가 무효(영구) — 그 외(408/429/5xx 등)는
+            // 일시 장애로 취급한다. 여기서 넓게 잡으면 프록시의 일시적 4xx에도 세션이 지워진다.
+            if [400, 401, 403].contains(http.statusCode) {
+                throw URLError(.userAuthenticationRequired)
+            }
+            throw URLError(.badServerResponse)
         }
         let d = JSONDecoder()
         d.keyDecodingStrategy = .convertFromSnakeCase
