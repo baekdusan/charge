@@ -18,3 +18,4 @@ collector/cloud.json
 # 구버전 개인 설정 잔재 — 새 수집기는 안 읽지만 실수로 커밋되지 않게 유지
 collector/.env
 collector/.last-payload.json
+ios/Shared/DefaultGist.txt
