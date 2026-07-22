@@ -23,7 +23,9 @@ targets:
       path: Charge/Info.plist
       properties:
         CFBundleDisplayName: Charge
-        UILaunchScreen: {}
+        # 런치스크린을 앱 배경(#111214)과 맞춰 흰 화면 번쩍임 제거
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
     settings:

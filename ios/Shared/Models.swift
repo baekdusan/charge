@@ -245,6 +245,20 @@ struct CollectorDevice: Codable, Identifiable {
         guard let lastSeenAt else { return nil }
         return Self.isoFrac.date(from: lastSeenAt) ?? Self.iso.date(from: lastSeenAt)
     }
+
+    /// "Dusanui-MacBookPro.local" → "Dusanui-MacBookPro"
+    var shortLabel: String? {
+        guard let l = label?.trimmingCharacters(in: .whitespacesAndNewlines), !l.isEmpty else { return nil }
+        return l.hasSuffix(".local") ? String(l.dropLast(6)) : l
+    }
+
+    /// 수집기는 5분 주기로 업로드한다 — 마지막 업로드가 12분 이내면 추적 중으로 본다
+    /// (시계 오차 대비 미래 1분까지 허용)
+    func isTracking(at now: Date) -> Bool {
+        guard let seen = lastSeenDate else { return false }
+        let age = now.timeIntervalSince(seen)
+        return age >= -60 && age <= 12 * 60
+    }
 }
 
 struct ActiveBlock: Codable {
