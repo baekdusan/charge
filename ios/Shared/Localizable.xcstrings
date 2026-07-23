@@ -1,1359 +1,1366 @@
 {
-  "sourceLanguage": "en",
-  "strings": {
-    "%@": {},
-    "%@ limit just reset.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 한도가 방금 리셋됐어요."
-          }
-        }
-      }
-    },
-    "%@ tok, 7d %@": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ tok, 7일 %@"
-          }
-        }
-      }
-    },
-    "%@ tokens": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 토큰"
-          }
-        }
-      }
-    },
-    "%@ weekly": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 주간"
-          }
-        }
-      }
-    },
-    "%@%%": {},
-    "%@%@%%": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "new",
-            "value": "%1$@%2$@%%"
-          }
-        }
-      }
-    },
-    "%@/hr": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@/시간"
-          }
-        }
-      }
+  "sourceLanguage" : "en",
+  "strings" : {
+    "%@" : {
+
     },
-    "14d": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "14일"
+    "%@ limit just reset." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 한도가 방금 리셋됐어요."
           }
         }
       }
     },
-    "30d": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "30일"
+    "%@ tok, 7d %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ tok, 7일 %@"
           }
         }
       }
     },
-    "30d %@": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "30일 %@"
+    "%@ tokens" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 토큰"
           }
         }
       }
     },
-    "5h %@": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "5시간 창 %@"
+    "%@ weekly" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 주간"
           }
         }
       }
     },
-    "7d": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "7일"
+    "%@/hr" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@/시간"
           }
         }
       }
     },
-    "7d %@": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "7일 %@"
+    "%@%@%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@%2$@%%"
           }
         }
       }
     },
-    "About": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "정보"
-          }
-        }
-      }
-    },
-    "Account": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "계정"
-          }
-        }
-      }
-    },
-    "All": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "전체"
-          }
-        }
-      }
-    },
-    "Back": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "뒤로"
-          }
-        }
-      }
-    },
-    "Bars": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "막대"
-          }
-        }
-      }
-    },
-    "Big number": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "숫자 크게"
-          }
-        }
-      }
+    "%@%%" : {
+
     },
-    "Cancel": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "취소"
+    "⚡ On pace to run out in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⚡ 이 속도면 %@ 후 소진"
           }
         }
       }
     },
-    "Chart": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "차트"
+    "⚡ Welcome to Charge" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⚡ Charge에 오신 걸 환영해요"
           }
         }
       }
     },
-    "Checking PC connection": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PC 연결 확인 중"
+    "🔥 %@ day streak" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🔥 %@일 연속"
           }
         }
       }
     },
-    "Choose Provider": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "프로바이더 선택"
+    "5h %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5시간 창 %@"
           }
         }
       }
     },
-    "Connect this app": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "앱 연결하기"
+    "7d" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7일"
           }
         }
       }
     },
-    "Connected computers": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "연결된 컴퓨터"
+    "7d %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7일 %@"
           }
         }
       }
     },
-    "Copied ✓": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "복사됨 ✓"
+    "14d" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "14일"
           }
         }
       }
     },
-    "Copy": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "복사"
+    "30d" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "30일"
           }
         }
       }
     },
-    "Cost, last %@ days": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "최근 %@일 비용"
+    "30d %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "30일 %@"
           }
         }
       }
     },
-    "Couldn't get a code. Check your connection and retry.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "코드를 발급받지 못했습니다. 연결을 확인하고 다시 시도하세요."
+    "About" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "정보"
           }
         }
       }
     },
-    "Couldn't reach the server. Check your connection and try again.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "서버에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요."
+    "Account" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "계정"
           }
         }
       }
     },
-    "Couldn't unpair. Check your connection and try again.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "연결 해제에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요."
+    "All" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전체"
           }
         }
       }
     },
-    "Critical (red)": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "위험 (빨강)"
+    "Back" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "뒤로"
           }
         }
       }
     },
-    "Current 5h window": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "현재 5시간 창"
+    "Bars" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "막대"
           }
         }
       }
     },
-    "Data source": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "데이터 소스"
+    "Big number" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "숫자 크게"
           }
         }
       }
     },
-    "Done": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "완료"
+    "Cancel" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "취소"
           }
         }
       }
     },
-    "Estimated": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "추정값"
+    "charge = battery + billing" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "충전 + 청구"
           }
         }
       }
     },
-    "Estimated usage": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "추정 사용량"
+    "Chart" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "차트"
           }
         }
       }
     },
-    "Failed to load: %@": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "불러오기 실패: %@"
+    "Checking PC connection" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PC 연결 확인 중"
           }
         }
       }
     },
-    "Gauge color thresholds": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "게이지 색상 임계값"
+    "Choose Provider" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로바이더 선택"
           }
         }
       }
     },
-    "Gauge colors change when usage crosses these thresholds.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "사용률이 임계값을 넘으면 게이지 색이 바뀝니다."
+    "Connect this app" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "앱 연결하기"
           }
         }
       }
     },
-    "GitHub repository": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "GitHub 저장소"
+    "Connected computers" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결된 컴퓨터"
           }
         }
       }
     },
-    "Green means the collector uploaded within the last few minutes. Swipe left to unpair a computer.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "초록불은 최근 몇 분 안에 수집기가 업로드했다는 뜻입니다. 왼쪽으로 밀면 연결을 해제할 수 있습니다."
+    "Copied ✓" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "복사됨 ✓"
           }
         }
       }
     },
-    "Hidden providers disappear from the app and widgets. New tools are detected by the desktop collector and appear here automatically.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "끄면 앱과 위젯에서 숨겨집니다. 새 도구는 데스크톱 수집기가 감지해 이 목록에 자동으로 나타납니다."
+    "Copy" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "복사"
           }
         }
       }
     },
-    "If you don’t have Node.js yet, install the LTS from nodejs.org.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Node.js가 없다면 nodejs.org에서 LTS 버전을 설치하세요."
+    "Cost, last %@ days" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "최근 %@일 비용"
           }
         }
       }
     },
-    "Install Node.js": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Node.js 설치"
+    "Couldn't get a code. Check your connection and retry." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "코드를 발급받지 못했습니다. 연결을 확인하고 다시 시도하세요."
           }
         }
       }
     },
-    "It checks every few seconds and opens Charge as soon as your PC connects. Pull down to check now.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "몇 초마다 연결을 확인하고 PC가 연결되면 Charge가 바로 열립니다. 지금 확인하려면 아래로 당기세요."
+    "Couldn't reach the server. Check your connection and try again." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요."
           }
         }
       }
     },
-    "Last collected": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "마지막 수집"
+    "Couldn't unpair. Check your connection and try again." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 해제에 실패했습니다. 네트워크 상태를 확인하고 다시 시도해주세요."
           }
         }
       }
     },
-    "Limit Number": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "한도 숫자"
+    "Critical (red)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "위험 (빨강)"
           }
         }
       }
     },
-    "Limit Ring": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "한도 링"
+    "Current 5h window" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "현재 5시간 창"
           }
         }
       }
     },
-    "Limit reached": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "한도 도달"
+    "Data source" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데이터 소스"
           }
         }
       }
     },
-    "Limit reset notifications": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "한도 리셋 알림"
+    "Done" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "완료"
           }
         }
       }
     },
-    "Linked PC": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "연결된 PC"
+    "estimated" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추정"
           }
         }
       }
     },
-    "Name": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "이름"
+    "Estimated" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추정값"
           }
         }
       }
     },
-    "Never synced": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "동기화 기록 없음"
+    "Estimated usage" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추정 사용량"
           }
         }
       }
     },
-    "New code": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "새 코드"
+    "Failed to load: %@" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "불러오기 실패: %@"
           }
         }
       }
     },
-    "No PC paired": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "연결된 PC 없음"
+    "Gauge color thresholds" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게이지 색상 임계값"
           }
         }
       }
     },
-    "No active session": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "활성 세션 없음"
+    "Gauge colors change when usage crosses these thresholds." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용률이 임계값을 넘으면 게이지 색이 바뀝니다."
           }
         }
       }
     },
-    "No data": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "데이터 없음"
+    "GitHub repository" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "GitHub 저장소"
           }
         }
       }
     },
-    "No data yet — run the command above, wait a moment, and try again.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "아직 데이터가 없어요 — 위 명령을 실행하고 잠시 뒤 다시 시도하세요."
+    "Green means the collector uploaded within the last few minutes. Swipe left to unpair a computer." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "초록불은 최근 몇 분 안에 수집기가 업로드했다는 뜻입니다. 왼쪽으로 밀면 연결을 해제할 수 있습니다."
           }
         }
       }
     },
-    "Not affiliated with Anthropic, OpenAI, or any AI provider. Their marks identify data sources only.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Anthropic, OpenAI 등 각 AI 서비스와 무관한 서드파티 앱입니다. 각 사의 마크는 데이터 출처 표시 목적으로만 사용됩니다."
+    "Hidden providers disappear from the app and widgets. New tools are detected by the desktop collector and appear here automatically." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "끄면 앱과 위젯에서 숨겨집니다. 새 도구는 데스크톱 수집기가 감지해 이 목록에 자동으로 나타납니다."
           }
         }
       }
     },
-    "Notifications": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "알림"
+    "If you don’t have Node.js yet, install the LTS from nodejs.org." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Node.js가 없다면 nodejs.org에서 LTS 버전을 설치하세요."
           }
         }
       }
     },
-    "Notifications are turned off in iOS Settings. Allow them for Charge to use this.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "iOS 설정에서 알림이 꺼져 있어요. Charge의 알림을 허용해야 사용할 수 있습니다."
+    "Install Node.js" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Node.js 설치"
           }
         }
       }
     },
-    "Notifies when a rate window past the warning threshold resets. Reset times update whenever the app refreshes.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "경고 임계값을 넘긴 사용량 창이 리셋되면 알려드려요. 리셋 시각은 앱이 새로고침될 때마다 갱신됩니다."
+    "It checks every few seconds and opens Charge as soon as your PC connects. Pull down to check now." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "몇 초마다 연결을 확인하고 PC가 연결되면 Charge가 바로 열립니다. 지금 확인하려면 아래로 당기세요."
           }
         }
       }
     },
-    "PC tracking active": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PC 사용량 추적 중"
+    "Last collected" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마지막 수집"
           }
         }
       }
     },
-    "Pair another computer": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "다른 컴퓨터 페어링"
+    "Limit Number" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한도 숫자"
           }
         }
       }
     },
-    "Paste this into Terminal (Mac: ⌘ + Space → “Terminal”, Windows: Win + X → “Terminal”).": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "터미널에 붙여넣으세요 (맥: ⌘ + Space → “터미널”, 윈도우: Win + X → “터미널”)."
+    "Limit reached" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한도 도달"
           }
         }
       }
     },
-    "Paste your project URL and anon key (not the service_role key).": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "프로젝트 URL과 anon 키를 붙여넣으세요 (service_role 키 아님)."
+    "Limit reset notifications" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한도 리셋 알림"
           }
         }
       }
     },
-    "Period": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "표시 기간"
+    "Limit Ring" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한도 링"
           }
         }
       }
     },
-    "Pick which AI provider to show.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "표시할 AI 프로바이더를 고릅니다."
+    "Linked PC" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결된 PC"
           }
         }
       }
     },
-    "Projected %@ by window end": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "이 속도면 창 종료까지 총 %@ 예상"
+    "Name" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이름"
           }
         }
       }
     },
-    "Provider": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "프로바이더"
+    "Never synced" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화 기록 없음"
           }
         }
       }
     },
-    "Provider Gauges": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "프로바이더 게이지"
+    "New code" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 코드"
           }
         }
       }
     },
-    "Provider Usage": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "프로바이더 사용량"
+    "No active session" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "활성 세션 없음"
           }
         }
       }
     },
-    "Provider usage beside the lock screen date.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "잠금화면 날짜 옆에 프로바이더 사용량을 표시합니다."
+    "No data" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데이터 없음"
           }
         }
       }
     },
-    "Providers": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "프로바이더"
+    "No data yet — run the command above, wait a moment, and try again." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아직 데이터가 없어요 — 위 명령을 실행하고 잠시 뒤 다시 시도하세요."
           }
         }
       }
     },
-    "Resets %@": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "리셋 %@"
+    "No PC paired" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결된 PC 없음"
           }
         }
       }
     },
-    "Resets in %@": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 후 재설정"
+    "Not affiliated with Anthropic, OpenAI, or any AI provider. Their marks identify data sources only." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anthropic, OpenAI 등 각 AI 서비스와 무관한 서드파티 앱입니다. 각 사의 마크는 데이터 출처 표시 목적으로만 사용됩니다."
           }
         }
       }
     },
-    "Resets soon": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "곧 재설정"
+    "Notifications" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "알림"
           }
         }
       }
     },
-    "Retry": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "다시 시도"
+    "Notifications are turned off in iOS Settings. Allow them for Charge to use this." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS 설정에서 알림이 꺼져 있어요. Charge의 알림을 허용해야 사용할 수 있습니다."
           }
         }
       }
     },
-    "Ring gauge": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "링 게이지"
+    "Notifies when a rate window past the warning threshold resets. Reset times update whenever the app refreshes." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "경고 임계값을 넘긴 사용량 창이 리셋되면 알려드려요. 리셋 시각은 앱이 새로고침될 때마다 갱신됩니다."
           }
         }
       }
     },
-    "Run the pairing command": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "페어링 명령 실행"
+    "Pair another computer" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다른 컴퓨터 페어링"
           }
         }
       }
     },
-    "Saved ✓": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "저장됨 ✓"
+    "Paste this into Terminal (Mac: ⌘ + Space → “Terminal”, Windows: Win + X → “Terminal”)." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널에 붙여넣으세요 (맥: ⌘ + Space → “터미널”, 윈도우: Win + X → “터미널”)."
           }
         }
       }
     },
-    "See your AI coding usage on your iPhone. Sign in, run one command on your computer, done.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "AI 코딩 사용량을 iPhone에서 확인하세요. 로그인하고, 컴퓨터에서 명령 한 줄이면 끝나요."
+    "Paste your project URL and anon key (not the service_role key)." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 URL과 anon 키를 붙여넣으세요 (service_role 키 아님)."
           }
         }
       }
     },
-    "Session": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "세션"
+    "PC tracking active" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PC 사용량 추적 중"
           }
         }
       }
     },
-    "Session and weekly usage at a glance.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "세션과 주간 사용량을 한눈에 표시합니다."
+    "Period" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "표시 기간"
           }
         }
       }
     },
-    "Session and weekly usage per provider. Long-press to choose one.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "프로바이더별 세션·주간 사용량. 길게 눌러 선택하세요."
+    "Pick which AI provider to show." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "표시할 AI 프로바이더를 고릅니다."
           }
         }
       }
     },
-    "Session and weekly usage per provider. Long-press to choose provider and style.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "프로바이더별 세션·주간 사용량. 길게 눌러 프로바이더와 스타일을 선택하세요."
+    "Projected %@ by window end" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 속도면 창 종료까지 총 %@ 예상"
           }
         }
       }
     },
-    "Session and weekly usage with plan and time markers.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "플랜과 시간 마커를 포함한 세션·주간 사용량."
+    "Provider" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로바이더"
           }
         }
       }
     },
-    "Session usage as a large percentage.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "세션 사용량을 큰 퍼센트로 표시합니다."
+    "Provider Gauges" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로바이더 게이지"
           }
         }
       }
     },
-    "Session usage in a compact ring.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "세션 사용량을 작은 링으로 표시합니다."
+    "Provider Usage" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로바이더 사용량"
           }
         }
       }
     },
-    "Settings": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "설정"
+    "Provider usage beside the lock screen date." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "잠금화면 날짜 옆에 프로바이더 사용량을 표시합니다."
           }
         }
       }
     },
-    "Setup": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "설정 가이드"
+    "Providers" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로바이더"
           }
         }
       }
     },
-    "Setup guide": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "설정 가이드 다시 보기"
+    "Resets %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "리셋 %@"
           }
         }
       }
     },
-    "Sign in": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "로그인"
+    "Resets in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 후 재설정"
           }
         }
       }
     },
-    "Sign in failed. Please try again.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "로그인에 실패했어요. 다시 시도해주세요."
+    "Resets soon" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "곧 재설정"
           }
         }
       }
     },
-    "Sign in to see your usage.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "로그인하면 사용량이 표시됩니다."
+    "Retry" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "다시 시도"
           }
         }
       }
     },
-    "Sign out": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "로그아웃"
+    "Ring gauge" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "링 게이지"
           }
         }
       }
     },
-    "Signed in": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "로그인됨"
+    "Run the pairing command" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "페어링 명령 실행"
           }
         }
       }
     },
-    "Streak": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "스트릭"
+    "Saved ✓" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "저장됨 ✓"
           }
         }
       }
     },
-    "Style": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "스타일"
+    "See your AI coding usage on your iPhone. Sign in, run one command on your computer, done." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 코딩 사용량을 iPhone에서 확인하세요. 로그인하고, 컴퓨터에서 명령 한 줄이면 끝나요."
           }
         }
       }
     },
-    "Test connection": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "연결 확인"
+    "Session" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션"
           }
         }
       }
     },
-    "The code expires in 10 minutes.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "코드는 10분 뒤 만료됩니다."
+    "Session and weekly usage at a glance." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션과 주간 사용량을 한눈에 표시합니다."
           }
         }
       }
     },
-    "Today": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "오늘"
+    "Session and weekly usage per provider. Long-press to choose one." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로바이더별 세션·주간 사용량. 길게 눌러 선택하세요."
           }
         }
       }
     },
-    "Today %@": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "오늘 %@"
+    "Session and weekly usage per provider. Long-press to choose provider and style." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로바이더별 세션·주간 사용량. 길게 눌러 프로바이더와 스타일을 선택하세요."
           }
         }
       }
     },
-    "Today by model": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "오늘 모델별"
+    "Session and weekly usage with plan and time markers." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플랜과 시간 마커를 포함한 세션·주간 사용량."
           }
         }
       }
     },
-    "Today's AI coding cost and the current 5h window.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "오늘의 AI 코딩 비용과 현재 5시간 창."
+    "Session usage as a large percentage." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 사용량을 큰 퍼센트로 표시합니다."
           }
         }
       }
     },
-    "Token Usage": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "토큰 사용량"
+    "Session usage in a compact ring." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "세션 사용량을 작은 링으로 표시합니다."
           }
         }
       }
     },
-    "Two provider gauges with time markers.": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "시간 마커가 있는 두 프로바이더 게이지."
+    "Settings" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정"
           }
         }
       }
     },
-    "Unpair": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "연결 해제"
+    "Setup" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정 가이드"
           }
         }
       }
     },
-    "Unpair this computer?": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "이 컴퓨터의 연결을 해제할까요?"
+    "Setup guide" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "설정 가이드 다시 보기"
           }
         }
       }
     },
-    "Updated %lldm ago": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld분 전 업데이트됨"
+    "Sign in" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인"
           }
         }
       }
     },
-    "Updated just now": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "방금 업데이트됨"
+    "Sign in failed. Please try again." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인에 실패했어요. 다시 시도해주세요."
           }
         }
       }
     },
-    "Usage Bars": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "사용량 막대"
+    "Sign in to see your usage." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인하면 사용량이 표시됩니다."
           }
         }
       }
     },
-    "Usage Inline": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "한 줄 사용량"
+    "Sign out" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그아웃"
           }
         }
       }
     },
-    "Usage Summary": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "사용량 요약"
+    "Signed in" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그인됨"
           }
         }
       }
     },
-    "Usage history uploaded by this computer will also be deleted. Its collector stops syncing until you pair it again.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "이 컴퓨터가 업로드한 사용 기록도 함께 삭제됩니다. 다시 페어링하기 전까지 이 컴퓨터의 수집기는 동기화되지 않습니다."
+    "soon" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "곧"
           }
         }
       }
     },
-    "Version": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "버전"
+    "Streak" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스트릭"
           }
         }
       }
     },
-    "Waiting for PC": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PC 연결 대기 중"
+    "Style" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스타일"
           }
         }
       }
     },
-    "Warning (orange)": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "경고 (주황)"
+    "Test connection" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 확인"
           }
         }
       }
     },
-    "Weekly": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "주간"
+    "The code expires in 10 minutes." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "코드는 10분 뒤 만료됩니다."
           }
         }
       }
     },
-    "charge = battery + billing": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "충전 + 청구"
+    "Today" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘"
           }
         }
       }
     },
-    "estimated": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "추정"
+    "Today %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘 %@"
           }
         }
       }
     },
-    "soon": {
-      "extractionState": "stale",
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "곧"
+    "Today by model" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘 모델별"
           }
         }
       }
     },
-    "today_peak_ratio": {
-      "extractionState": "stale",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Today is %lld%% of your recent peak"
+    "today_peak_ratio" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today is %lld%% of your recent peak"
           }
         },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "오늘은 최근 최고치의 %lld%%를 썼어요"
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘은 최근 최고치의 %lld%%를 썼어요"
           }
         }
       }
     },
-    "used": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "사용"
+    "Today's AI coding cost and the current 5h window." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘의 AI 코딩 비용과 현재 5시간 창."
           }
         }
       }
     },
-    "⚡ On pace to run out in %@": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "⚡ 이 속도면 %@ 후 소진"
+    "Token Usage" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "토큰 사용량"
           }
         }
       }
     },
-    "⚡ Welcome to Charge": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "⚡ Charge에 오신 걸 환영해요"
+    "Two provider gauges with time markers." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시간 마커가 있는 두 프로바이더 게이지."
           }
         }
       }
     },
-    "🔥 %@ day streak": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "🔥 %@일 연속"
+    "Unpair" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 해제"
+          }
+        }
+      }
+    },
+    "Unpair this computer?" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 컴퓨터의 연결을 해제할까요?"
+          }
+        }
+      }
+    },
+    "Updated %lldm ago" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld분 전 업데이트됨"
+          }
+        }
+      }
+    },
+    "Updated just now" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "방금 업데이트됨"
+          }
+        }
+      }
+    },
+    "Usage Bars" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용량 막대"
+          }
+        }
+      }
+    },
+    "Usage history uploaded by this computer will also be deleted. Its collector stops syncing until you pair it again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 컴퓨터가 업로드한 사용 기록도 함께 삭제됩니다. 다시 페어링하기 전까지 이 컴퓨터의 수집기는 동기화되지 않습니다."
+          }
+        }
+      }
+    },
+    "Usage Inline" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한 줄 사용량"
+          }
+        }
+      }
+    },
+    "Usage Summary" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용량 요약"
+          }
+        }
+      }
+    },
+    "used" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용"
+          }
+        }
+      }
+    },
+    "Version" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "버전"
+          }
+        }
+      }
+    },
+    "Waiting for PC" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PC 연결 대기 중"
+          }
+        }
+      }
+    },
+    "Warning (orange)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "경고 (주황)"
+          }
+        }
+      }
+    },
+    "Weekly" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "주간"
           }
         }
       }
     }
   },
-  "version": "1.0"
+  "version" : "1.0"
 }
