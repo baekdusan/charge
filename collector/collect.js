@@ -233,65 +233,124 @@ async function claudeProvider() {
 }
 
 // Codex: 최신 세션 로그에 기록된 rate_limits 스냅샷 파싱
-function codexProvider() {
+// Codex 자격증명·계정 정보 (~/.codex/auth.json) — 없으면 null
+function codexAuth() {
   try {
-    const dir = path.join(HOME, ".codex", "sessions");
-    let latest = null;
-    (function walk(d) {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) walk(p);
-        else if (e.name.endsWith(".jsonl")) {
-          const m = fs.statSync(p).mtimeMs;
-          if (!latest || m > latest.m) latest = { p, m };
-        }
-      }
-    })(dir);
-    if (!latest) return null;
-
-    const findRL = (o) => {
-      if (!o || typeof o !== "object") return null;
-      if (o.rate_limits) return o.rate_limits;
-      for (const v of Object.values(o)) {
-        const r = findRL(v);
-        if (r) return r;
-      }
-      return null;
-    };
-    let rl = null;
-    for (const line of fs.readFileSync(latest.p, "utf8").split("\n")) {
-      if (!line.includes('"rate_limits"')) continue;
-      try {
-        rl = findRL(JSON.parse(line)) ?? rl;
-      } catch {}
-    }
-    if (!rl) return null;
-    // auth.json id_token JWT의 chatgpt_plan_type ("education" 등) + 계정 식별자
+    const auth = JSON.parse(fs.readFileSync(path.join(HOME, ".codex", "auth.json"), "utf8"));
     let plan = null;
     let account = null;
     try {
-      const auth = JSON.parse(fs.readFileSync(path.join(HOME, ".codex", "auth.json"), "utf8"));
+      // id_token JWT의 chatgpt_plan_type ("education" 등) + 계정 식별자
       const seg = auth.tokens.id_token.split(".")[1];
       const claims = JSON.parse(Buffer.from(seg, "base64url").toString("utf8"));
       const a = claims["https://api.openai.com/auth"] ?? {};
       if (a.chatgpt_plan_type) plan = a.chatgpt_plan_type[0].toUpperCase() + a.chatgpt_plan_type.slice(1);
       account = accountHash(a.chatgpt_account_id);
     } catch {}
+    return {
+      accessToken: auth.tokens?.access_token ?? null,
+      accountId: auth.tokens?.account_id ?? null,
+      plan,
+      account,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Codex 실시간 조회: Codex CLI 자신이 60초마다 폴링하는 것과 같은 엔드포인트를
+// 로컬 OAuth 토큰으로 호출한다. 토큰 갱신은 하지 않는다 — 만료됐으면 null을 반환하고
+// 스냅샷 폴백에 맡긴다 (CLI가 다음 실행 때 알아서 갱신해 둔다).
+async function codexLiveWindows(auth) {
+  if (!auth?.accessToken || !auth?.accountId) return null;
+  try {
+    const res = await fetch("https://chatgpt.com/backend-api/wham/usage", {
+      headers: {
+        Authorization: `Bearer ${auth.accessToken}`,
+        "chatgpt-account-id": auth.accountId,
+        "User-Agent": "charge-collector",
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
     const win = (w) =>
-      w
+      w && Number.isFinite(Number(w.used_percent))
         ? {
-            percent: w.used_percent ?? 0,
-            resets_at: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null,
-            window_minutes: w.window_minutes ?? null,
+            percent: Number(w.used_percent),
+            resets_at: w.reset_at ? new Date(w.reset_at * 1000).toISOString() : null,
+            window_minutes: Number.isFinite(Number(w.limit_window_seconds))
+              ? Math.round(Number(w.limit_window_seconds) / 60)
+              : null,
           }
         : null;
+    const session = win(d.rate_limit?.primary_window);
+    const weekly = win(d.rate_limit?.secondary_window);
+    if (!session && !weekly) return null;
+    const plan = usefulPlan(d.plan_type);
+    return { session, weekly, plan: plan ? plan[0].toUpperCase() + plan.slice(1) : null };
+  } catch {
+    return null;
+  }
+}
+
+// Codex 스냅샷 폴백: 가장 최근 세션 로그(.jsonl)에 기록된 마지막 rate_limits —
+// 마지막으로 Codex를 실제 사용한 시점의 값이라 실시간 조회가 실패했을 때만 쓴다
+function codexSnapshotWindows() {
+  const dir = path.join(HOME, ".codex", "sessions");
+  let latest = null;
+  (function walk(d) {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".jsonl")) {
+        const m = fs.statSync(p).mtimeMs;
+        if (!latest || m > latest.m) latest = { p, m };
+      }
+    }
+  })(dir);
+  if (!latest) return null;
+
+  const findRL = (o) => {
+    if (!o || typeof o !== "object") return null;
+    if (o.rate_limits) return o.rate_limits;
+    for (const v of Object.values(o)) {
+      const r = findRL(v);
+      if (r) return r;
+    }
+    return null;
+  };
+  let rl = null;
+  for (const line of fs.readFileSync(latest.p, "utf8").split("\n")) {
+    if (!line.includes('"rate_limits"')) continue;
+    try {
+      rl = findRL(JSON.parse(line)) ?? rl;
+    } catch {}
+  }
+  if (!rl) return null;
+  const win = (w) =>
+    w
+      ? {
+          percent: w.used_percent ?? 0,
+          resets_at: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null,
+          window_minutes: w.window_minutes ?? null,
+        }
+      : null;
+  return { session: win(rl.primary), weekly: win(rl.secondary) };
+}
+
+async function codexProvider() {
+  try {
+    const auth = codexAuth();
+    const windows = (await codexLiveWindows(auth)) ?? codexSnapshotWindows();
+    if (!windows) return null;
     return {
       id: "codex",
       name: "Codex",
-      plan,
-      account,
-      session: dropExpired(win(rl.primary)),
-      weekly: dropExpired(win(rl.secondary)),
+      plan: windows.plan ?? auth?.plan ?? null,
+      account: auth?.account ?? null,
+      session: dropExpired(windows.session),
+      weekly: dropExpired(windows.weekly),
       extras: null,
     };
   } catch (e) {
@@ -450,10 +509,11 @@ async function collectProviders() {
   const claudePromise = claudeProvider();
   const claudeStatusPromise = statusOf("https://status.anthropic.com/api/v2/status.json");
   const codexStatusPromise = statusOf("https://status.openai.com/api/v2/status.json");
-  const codex = codexProvider();
+  const codexPromise = codexProvider();
   const codexBar = collectCodexBarProviders();
-  const [claude, claudeStatus, codexStatus] = await Promise.all([
+  const [claude, codex, claudeStatus, codexStatus] = await Promise.all([
     claudePromise,
+    codexPromise,
     claudeStatusPromise,
     codexStatusPromise,
   ]);
