@@ -16,6 +16,11 @@ struct ContentView: View {
     @State private var hidden: Set<String> = []
     /// 현재 providers/devices 페이로드를 조회하기 시작한 시점의 세션 세대
     @State private var payloadEpoch = ChargeAuth.sessionEpoch
+    /// 위젯에 마지막으로 반영한 "표시 콘텐츠" 지문 — 실제 값이 바뀔 때만 위젯을 리로드한다
+    @State private var lastWidgetSync: String?
+    /// 백그라운드를 거쳐 돌아왔는지 — 최초 실행 시의 불필요한 재로드를 막는다
+    @State private var wasBackgrounded = false
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("warnThreshold") private var warnThreshold = 70.0
     @AppStorage("critThreshold") private var critThreshold = 90.0
     @AppStorage("chartDays") private var chartDays = 14
@@ -97,6 +102,21 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .tint(ChargeTheme.accent)
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active where wasBackgrounded:
+                // 백그라운드에서 돌아옴 — 최신 데이터로 새로고침하고 위젯도 맞춘다
+                wasBackgrounded = false
+                Task { await load(reloadWidgets: true) }
+            case .background:
+                // 앱을 나가기 직전 위젯이 최신 데이터로 타임라인을 다시 만들게 한다
+                // (홈·잠금화면 위젯이 곧바로 최신값을 보이도록)
+                wasBackgrounded = true
+                WidgetCenter.shared.reloadAllTimelines()
+            default:
+                break
+            }
+        }
     }
 
     private var content: some View {
@@ -520,18 +540,35 @@ struct ContentView: View {
         .cardStyle()
     }
 
+    /// 위젯이 실제 렌더링하는 값만 추린 지문. 기기 last_seen_at·generatedAt처럼 매 사이클
+    /// 변하는 값은 제외해, 표시 내용이 그대로면 불필요한 위젯 리로드를 하지 않는다.
+    /// (generatedAt = charge_live 타임스탬프에만 의존하면 백엔드 ingest 방식에 결합되므로 사용하지 않는다.)
+    private func widgetFingerprint(_ payload: UsagePayload) -> String {
+        func win(_ w: RateWindow?) -> String {
+            guard let w else { return "-" }
+            return "\(w.percent):\(w.resetsAt ?? "")"
+        }
+        let provs = (payload.providers ?? [])
+            .sorted { $0.uid < $1.uid }
+            .map { p -> String in
+                let extras = (p.extras ?? [])
+                    .map { "\($0.name)=\(win($0.window))" }
+                    .joined(separator: ",")
+                return "\(p.uid)|\(p.plan ?? "")|\(p.status?.indicator ?? "")|S\(win(p.session))|W\(win(p.weekly))|E[\(extras)]"
+            }
+            .joined(separator: ";")
+        let today = payload.daily.first { $0.period == ChargeDate.todayString() }?.totalCost ?? 0
+        let live = payload.live?.costUSD ?? -1
+        return "\(provs)#today:\(today)#live:\(live)"
+    }
+
     private func load(reloadWidgets: Bool = false) async {
         // 이미 로드 중이면 끝날 때까지 기다렸다가 새로 로드한다 (풀 리프레시가 즉시 끝나 보이는 것 방지)
         while loading {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         loading = true
-        defer {
-            loading = false
-            if reloadWidgets {
-                WidgetCenter.shared.reloadAllTimelines()
-            }
-        }
+        defer { loading = false }
         do {
             // 로드 시작 시점의 세션 세대 — 로그아웃/재로그인을 건너온 응답인지 판별용
             let epoch = ChargeAuth.sessionEpoch
@@ -559,6 +596,13 @@ struct ContentView: View {
                 generatedAt = f.date(from: g) ?? ISO8601DateFormatter().date(from: g)
             }
             error = nil
+            // 위젯이 실제 보여주는 값이 바뀌었거나(60초 폴링 포함) 명시적 요청이면 리로드한다.
+            // reloadAllTimelines()는 위젯 프로세스가 자기 타임라인을 다시 만들며 최신 데이터를 받아온다.
+            let fingerprint = widgetFingerprint(payload)
+            if reloadWidgets || fingerprint != lastWidgetSync {
+                lastWidgetSync = fingerprint
+                WidgetCenter.shared.reloadAllTimelines()
+            }
         } catch ChargeError.notConfigured {
             // 로그아웃 상태 — 이전 계정 데이터를 화면에서 지우고 온보딩으로 유도
             daily = []
