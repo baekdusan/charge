@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Charge Privacy Policy</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+           max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #1c1c1e; }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.1rem; margin-top: 1.8rem; }
+    .updated { color: #8e8e93; font-size: 0.9rem; }
+    p, li { color: #3a3a3c; }
+    a { color: #b4830a; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #111214; color: #f2f2f7; }
+      p, li { color: #d1d1d6; }
+      a { color: #e0b13e; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Charge Privacy Policy</h1>
+  <p class="updated">Last updated: 2026-07-30 · <a href="privacy.html">한국어</a></p>
+
+  <h2>1. Overview</h2>
+  <p>Charge collects usage statistics of AI coding tools (Claude Code, Codex CLI, and others) from your computer and shows them on your iPhone. We collect and store only what this purpose requires.</p>
+
+  <h2>2. What we collect</h2>
+  <ul>
+    <li><strong>Account</strong>: the identifier issued by Sign in with Apple, and your email address if you choose to share it.</li>
+    <li><strong>Usage data</strong>: daily cost and token counts, per-model breakdowns, rate-limit utilization with reset times, and subscription plan names.</li>
+    <li><strong>Device info</strong>: the hostname of paired computers (e.g. “MacBook-Pro”) and the time of their last upload.</li>
+    <li><strong>Account hashes</strong>: a one-way 12-character hash used to tell AI tool accounts apart. Raw emails or IDs of those accounts never leave your computer.</li>
+  </ul>
+
+  <h2>3. What we do not collect</h2>
+  <p>We never collect conversations, prompts, code, file names, or anything you type into AI tools. Your AI tools' login tokens (credentials) never leave your computer.</p>
+
+  <h2>4. Storage and security</h2>
+  <p>Data is stored in Supabase (a hosted database). Row Level Security ensures you can only read and write your own rows. The collector can only upload using a device token issued during pairing; the server stores only a hash of that token.</p>
+
+  <h2>5. Retention and deletion</h2>
+  <ul>
+    <li><strong>Unpairing a computer</strong> in the app immediately deletes the data that computer uploaded.</li>
+    <li><strong>Delete account</strong> in the app settings permanently removes your account and all synced usage data from the server.</li>
+  </ul>
+
+  <h2>6. Tracking and ads</h2>
+  <p>No ads, no analytics, no tracking tools.</p>
+
+  <h2>7. Third parties</h2>
+  <p>We never sell or share your data with third parties. The only infrastructure involved is Supabase, used solely for storage.</p>
+
+  <h2>8. Contact</h2>
+  <p>Questions? Email <a href="mailto:dusanisbaek@gmail.com">dusanisbaek@gmail.com</a>.</p>
+</body>
+</html>
