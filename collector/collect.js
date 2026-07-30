@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // Charge 수집기 — ccusage로 토큰 사용량을 뽑아 Charge 백엔드에 업로드한다.
 // 사용법: node collect.js [--dry-run] [--days N]
-// 인증: `npx charge-collector <페어링코드>`가 저장한 ~/.charge/config.json의 디바이스 토큰
+// 인증: `npx charge-connect <페어링코드>`가 저장한 ~/.charge/config.json의 디바이스 토큰
 
-const { execFileSync } = require("node:child_process");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
 const fs = require("node:fs");
 const path = require("node:path");
+
+const execFileAsync = promisify(execFile);
 
 const DRY_RUN = process.argv.includes("--dry-run");
 const daysArg = process.argv.indexOf("--days");
@@ -17,24 +20,30 @@ const WIN = process.platform === "win32";
 const EXTRA_PATH = WIN ? "" : ":/opt/homebrew/bin:/usr/local/bin";
 const DEFAULT_CODEXBAR_CLI = "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI";
 
-function run(cmd, args, timeout = 120_000) {
-  return execFileSync(cmd, args, {
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    timeout,
-    env: { ...process.env, PATH: `${process.env.PATH}${EXTRA_PATH}` },
-    // Windows에서 npx/ccusage는 .cmd 셔틀이라 셸을 거쳐야 실행된다 (인자는 모두 고정 문자열)
-    shell: WIN,
-  });
+// 모든 외부 명령은 비동기로 실행한다 — 동기(execFileSync)는 이벤트 루프를 세워
+// 진행 중인 fetch(AbortSignal 타이머 포함)를 전부 타임아웃시킨다.
+// Windows에서 npx/ccusage는 .cmd 셔틀이라 셸을 거쳐야 실행된다 (인자는 모두 고정 문자열).
+const execOpts = (timeout) => ({
+  encoding: "utf8",
+  maxBuffer: 64 * 1024 * 1024,
+  timeout,
+  env: { ...process.env, PATH: `${process.env.PATH}${EXTRA_PATH}` },
+  shell: WIN,
+});
+
+async function runAsync(cmd, args, timeout = 120_000) {
+  // promisify된 execFile은 실패 시에도 err.stdout/stderr를 붙여준다
+  return (await execFileAsync(cmd, args, execOpts(timeout))).stdout;
 }
 
-function runCcusage(args) {
+async function runCcusage(args) {
   // 전역 설치본이 있으면 사용(빠름), 없으면 npx로 대체
   try {
-    return JSON.parse(run("ccusage", args));
+    return JSON.parse(await runAsync("ccusage", args));
   } catch (e) {
-    console.error(`ccusage 직접 실행 실패(${e.code ?? e.message}), npx로 재시도`);
-    return JSON.parse(run("npx", ["-y", "ccusage@latest", ...args], 300_000));
+    console.error(`ccusage 직접 실행 실패(${e.code ?? e.message}), npx로 재시도 — 'npm i -g ccusage'를 해두면 빨라집니다`);
+    // --prefer-offline: npx 캐시가 있으면 레지스트리 조회 없이 재사용 (5분마다 재다운로드 방지)
+    return JSON.parse(await runAsync("npx", ["-y", "--prefer-offline", "ccusage@latest", ...args], 300_000));
   }
 }
 
@@ -49,6 +58,21 @@ function dropExpired(w) {
   if (!w) return null;
   if (w.resets_at && new Date(w.resets_at).getTime() < Date.now()) return null;
   return w;
+}
+
+// 캐시에서 복원한 프로바이더도 신선 수집과 같은 만료 규칙을 적용한다.
+// 안 하면 수집이 실패하는 동안 리셋이 지난 창이 무한 재업로드된다 (유령 게이지).
+function sanitizeCachedProvider(prev) {
+  if (!prev || typeof prev !== "object") return null;
+  const extras = (prev.extras ?? [])
+    .map((extra) => ({ ...extra, window: dropExpired(extra.window) }))
+    .filter((extra) => extra.window);
+  return {
+    ...prev,
+    session: dropExpired(prev.session),
+    weekly: dropExpired(prev.weekly),
+    extras: extras.length ? extras : null,
+  };
 }
 
 const PROVIDER_NAMES = {
@@ -137,8 +161,8 @@ function sinceStr(days) {
   return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function collectDaily() {
-  const data = runCcusage(["daily", "--json", "--since", sinceStr(DAYS)]);
+async function collectDaily() {
+  const data = await runCcusage(["daily", "--json", "--since", sinceStr(DAYS)]);
   let rows = data.daily ?? [];
   // 에이전트별 행과 "all" 집계 행이 섞여 있으면 "all"만 사용해 중복 합산을 방지
   if (rows.some((r) => r.agent === "all")) rows = rows.filter((r) => r.agent === "all");
@@ -161,15 +185,15 @@ function collectDaily() {
   return [...byDay.values()].sort((a, b) => a.period.localeCompare(b.period));
 }
 
-function collectLive() {
-  const data = runCcusage(["blocks", "--active", "--json"]);
+async function collectLive() {
+  const data = await runCcusage(["blocks", "--active", "--json"]);
   return (data.blocks ?? []).find((b) => b.isActive) ?? null;
 }
 
 // Claude Code 자격증명: macOS는 Keychain, Windows/Linux는 ~/.claude/.credentials.json
-function claudeCredentials() {
+async function claudeCredentials() {
   try {
-    return JSON.parse(run("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"]));
+    return JSON.parse(await runAsync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"]));
   } catch {
     return JSON.parse(fs.readFileSync(path.join(HOME, ".claude", ".credentials.json"), "utf8"));
   }
@@ -178,7 +202,7 @@ function claudeCredentials() {
 // Claude: Claude Code OAuth 세션을 재사용해 공식 usage API 조회
 async function claudeProvider() {
   try {
-    const cred = claudeCredentials();
+    const cred = await claudeCredentials();
     const oauth = cred.claudeAiOauth ?? cred;
     const token = oauth.accessToken;
     // rateLimitTier "default_claude_max_20x" → "Max 20x", 없으면 subscriptionType "max" → "Max"
@@ -192,7 +216,11 @@ async function claudeProvider() {
       headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
       signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // 401 = 토큰 만료 (Claude Code를 한 번 실행하면 갱신됨), 그 외는 일시 장애일 가능성
+      console.error(`claude usage API ${res.status}${res.status === 401 ? " — 토큰 만료, Claude Code를 실행하면 갱신됩니다" : ""}`);
+      return null;
+    }
     const d = await res.json();
     // 계정 UUID → 해시 (프로필 조회 실패 시 null — 캐시 폴백이 채워준다)
     let account = null;
@@ -268,7 +296,7 @@ async function codexLiveWindows(auth) {
       headers: {
         Authorization: `Bearer ${auth.accessToken}`,
         "chatgpt-account-id": auth.accountId,
-        "User-Agent": "charge-collector",
+        "User-Agent": "charge-connect",
       },
       signal: AbortSignal.timeout(10_000),
     });
@@ -460,7 +488,7 @@ function parseCodexBarJSON(raw) {
   }
 }
 
-function collectCodexBarProviders() {
+async function collectCodexBarProviders() {
   if (process.env.CHARGE_DISABLE_CODEXBAR === "1") return { providers: [], complete: false };
   const cli = process.env.CHARGE_CODEXBAR_CLI
     ?? (!WIN && fs.existsSync(DEFAULT_CODEXBAR_CLI) ? DEFAULT_CODEXBAR_CLI : null);
@@ -469,7 +497,9 @@ function collectCodexBarProviders() {
   let raw = "";
   let commandSucceeded = true;
   try {
-    raw = run(cli, ["usage", "--format", "json"], 90_000);
+    // CodexBar CLI는 실측 20초 이상 걸릴 수 있다 — 동기로 돌리면 그동안 이벤트 루프가
+    // 멈춰 Claude/Codex fetch의 abort 타이머가 전부 발화하므로 반드시 비동기로.
+    raw = await runAsync(cli, ["usage", "--format", "json"], 90_000);
   } catch (e) {
     commandSucceeded = false;
     raw = e.stdout?.toString?.() ?? "";
@@ -506,16 +536,12 @@ async function statusOf(url) {
 }
 
 async function collectProviders() {
-  const claudePromise = claudeProvider();
-  const claudeStatusPromise = statusOf("https://status.anthropic.com/api/v2/status.json");
-  const codexStatusPromise = statusOf("https://status.openai.com/api/v2/status.json");
-  const codexPromise = codexProvider();
-  const codexBar = collectCodexBarProviders();
-  const [claude, codex, claudeStatus, codexStatus] = await Promise.all([
-    claudePromise,
-    codexPromise,
-    claudeStatusPromise,
-    codexStatusPromise,
+  const [claude, codex, claudeStatus, codexStatus, codexBar] = await Promise.all([
+    claudeProvider(),
+    codexProvider(),
+    statusOf("https://status.anthropic.com/api/v2/status.json"),
+    statusOf("https://status.openai.com/api/v2/status.json"),
+    collectCodexBarProviders(),
   ]);
   if (claude) claude.status = claudeStatus;
   if (codex) codex.status = codexStatus;
@@ -560,24 +586,32 @@ async function main() {
     cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
   } catch {}
 
+  // ccusage 두 갈래와 프로바이더 수집(네트워크+CodexBar CLI)은 서로 독립 —
+  // 병렬로 돌려 전체 수집 시간을 max(ccusage, network)로 줄인다.
+  // allSettled라 한 갈래가 실패해도 나머지는 살고, 실패분만 이전 값으로 채운다.
+  const [dailyR, liveR, providersR] = await Promise.allSettled([
+    collectDaily(),
+    collectLive(),
+    collectProviders(),
+  ]);
   let daily, live, providers;
-  try {
-    daily = collectDaily();
-  } catch (e) {
-    console.error(`daily 수집 실패, 이전 값 유지: ${e.message ?? e}`);
+  if (dailyR.status === "fulfilled") {
+    daily = dailyR.value;
+  } else {
+    console.error(`daily 수집 실패, 이전 값 유지: ${dailyR.reason?.message ?? dailyR.reason}`);
     daily = cache.daily ?? [];
   }
-  try {
-    live = collectLive();
-  } catch (e) {
-    console.error(`live 수집 실패, 이전 값 유지: ${e.message ?? e}`);
+  if (liveR.status === "fulfilled") {
+    live = liveR.value;
+  } else {
+    console.error(`live 수집 실패, 이전 값 유지: ${liveR.reason?.message ?? liveR.reason}`);
     live = cache.live ?? null;
   }
   let providerCollection;
-  try {
-    providerCollection = await collectProviders();
-  } catch (e) {
-    console.error(`프로바이더 수집 실패, 이전 값 유지: ${e.message ?? e}`);
+  if (providersR.status === "fulfilled") {
+    providerCollection = providersR.value;
+  } else {
+    console.error(`프로바이더 수집 실패, 이전 값 유지: ${providersR.reason?.message ?? providersR.reason}`);
     providerCollection = { providers: [], codexBarComplete: false };
   }
   providers = providerCollection.providers;
@@ -586,7 +620,8 @@ async function main() {
     if (providers.some((p) => p.id === prev.id)) continue;
     // CodexBar가 정상 완료된 경우, 거기서 더 이상 반환하지 않는 항목은 사용자가 끈 것으로 본다.
     if (providerCollection.codexBarComplete && prev.collector_source === "codexbar") continue;
-    providers.push(prev);
+    const sanitized = sanitizeCachedProvider(prev);
+    if (sanitized) providers.push(sanitized);
   }
   // 계정 식별 실패 시 마지막으로 알려진 계정 해시 유지 (계정 미상('')과 실제 계정 행이 갈라지는 것 방지)
   for (const p of providers) {
@@ -601,7 +636,7 @@ async function main() {
 
   const mode = resolveMode();
   if (!mode) {
-    console.error("페어링이 안 돼 있습니다. 앱에서 코드를 발급받아 `npx charge-collector <코드>`를 실행하세요.");
+    console.error("페어링이 안 돼 있습니다. 앱에서 코드를 발급받아 `npx charge-connect <코드>`를 실행하세요.");
     process.exit(1);
   }
 
@@ -629,6 +664,7 @@ module.exports = {
   normalizeResetAt,
   parseCodexBarJSON,
   resolveMode,
+  sanitizeCachedProvider,
   titleCaseProvider,
   usefulPlan,
 };

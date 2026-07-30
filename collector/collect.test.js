@@ -136,3 +136,57 @@ test("T08 codexBarEntryToProvider 제외 규칙 + resolveMode 우선순위", () 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test("T09 sanitizeCachedProvider: 캐시 복원 시 만료 창 제거, 유효 창·항목은 유지", () => {
+  const past = new Date(Date.now() - 60_000).toISOString();
+  const p = C.sanitizeCachedProvider({
+    id: "claude",
+    session: { percent: 27, resets_at: past },
+    weekly: { percent: 50, resets_at: futureReset },
+    extras: [
+      { name: "X", window: { percent: 1, resets_at: past } },
+      { name: "Y", window: { percent: 2, resets_at: futureReset } },
+    ],
+  });
+  assert.equal(p.session, null); // 리셋 지난 창은 재업로드 금지
+  assert.equal(p.weekly.percent, 50);
+  assert.equal(p.extras.length, 1);
+  assert.equal(p.extras[0].name, "Y");
+  // 창이 전부 만료돼도 프로바이더 항목 자체는 남는다 (앱 설정 토글 유지)
+  const empty = C.sanitizeCachedProvider({ id: "x", session: { percent: 1, resets_at: past }, weekly: null, extras: null });
+  assert.equal(empty.id, "x");
+  assert.equal(empty.session, null);
+  assert.equal(empty.extras, null);
+  assert.equal(C.sanitizeCachedProvider(null), null);
+});
+
+test("T10 collectCodexBarProviders: CLI가 도는 동안 이벤트 루프가 살아있다 (Claude fetch 기아 회귀 방지)",
+  { skip: process.platform === "win32" }, async () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "charge-test-"));
+  const cli = path.join(tmp, "fake-codexbar.sh");
+  fs.writeFileSync(cli, [
+    "#!/bin/sh",
+    "sleep 1",
+    `echo '[{"provider":"gemini","usage":{"primary":{"usedPercent":10,"resetsAt":"${futureReset}","windowMinutes":300}}}]'`,
+    "",
+  ].join("\n"), { mode: 0o755 });
+  const saved = { ...process.env };
+  try {
+    process.env.CHARGE_CODEXBAR_CLI = cli;
+    delete process.env.CHARGE_DISABLE_CODEXBAR;
+    let timerFired = false;
+    setTimeout(() => { timerFired = true; }, 200);
+    const result = await C.collectCodexBarProviders();
+    // 예전 동기(execFileSync) 구현에서는 CLI 1초 동안 루프가 멈춰 이 타이머가 못 돌았다
+    assert.equal(timerFired, true);
+    assert.equal(result.complete, true);
+    assert.equal(result.providers.length, 1);
+    assert.equal(result.providers[0].id, "gemini");
+  } finally {
+    for (const k of ["CHARGE_CODEXBAR_CLI", "CHARGE_DISABLE_CODEXBAR"]) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
