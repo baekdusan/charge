@@ -43,8 +43,23 @@ targets:
     dependencies:
       - target: ChargeWidget
     scheme:
-      testTargets: []
+      testTargets:
+        - ChargeUITests
       gatherCoverageData: false
+  # 스크린샷 자동화 전용 (App Store 스크린샷을 데모 모드로 촬영) — 앱 배포에는 포함되지 않는다
+  ChargeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - ChargeUITests
+    dependencies:
+      - target: Charge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dusan.charge.uitests
+        TEST_TARGET_NAME: Charge
+        GENERATE_INFOPLIST_FILE: YES
+
   ChargeWidget:
     type: app-extension
     platform: iOS
