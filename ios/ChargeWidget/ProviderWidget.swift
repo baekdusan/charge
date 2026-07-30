@@ -272,14 +272,6 @@ struct ProviderWidgetView: View {
         }
     }
 
-    private func compactWindowLabel(_ window: RateWindow?, fallback: String) -> String {
-        guard let label = window?.label?.trimmingCharacters(in: .whitespacesAndNewlines), !label.isEmpty else {
-            return fallback
-        }
-        let initials = label.split(separator: " ").prefix(2).compactMap(\.first)
-        return initials.isEmpty ? fallback : String(initials).uppercased()
-    }
-
     var body: some View {
         switch family {
         case .accessoryCircular:
@@ -451,7 +443,7 @@ struct ProviderWidgetView: View {
         let session = provider?.session?.displayState()
         let weekly = provider?.weekly?.displayState()
 
-        return VStack(alignment: .leading, spacing: 2) {
+        return VStack(alignment: .leading, spacing: 3) {
             if let provider {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     HStack(spacing: 4) {
@@ -469,20 +461,17 @@ struct ProviderWidgetView: View {
                             .lineLimit(1)
                     }
                 }
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(compactWindowLabel(provider.session, fallback: "S"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text("\(Int(session?.window.percent ?? 0))%")
-                        .font(.system(.title3, design: .rounded).bold().monospacedDigit())
-                        .opacity(session?.isEstimated == true ? 0.58 : 1)
-                    Spacer(minLength: 8)
-                    Text(compactWindowLabel(provider.weekly, fallback: "W"))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text("\(Int(weekly?.window.percent ?? 0))%")
-                        .font(.system(.title3, design: .rounded).bold().monospacedDigit())
-                        .opacity(weekly?.isEstimated == true ? 0.58 : 1)
+                // 한 줄에 큰 숫자 둘을 나란히 두면 좁은 잠금화면 폭에서 "5…"로 잘린다 —
+                // 라벨 위 + 숫자 아래로 쌓고, 숫자는 잘리는 대신 축소되게 한다
+                HStack(alignment: .top, spacing: 12) {
+                    summaryStat(
+                        label: provider.session?.label ?? String(localized: "Session"),
+                        state: session
+                    )
+                    summaryStat(
+                        label: provider.weekly?.label ?? String(localized: "Weekly"),
+                        state: weekly
+                    )
                 }
             } else {
                 Text("No data").font(.caption2)
@@ -490,6 +479,22 @@ struct ProviderWidgetView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .containerBackground(.fill.tertiary, for: .widget)
+    }
+
+    private func summaryStat(label: String, state: RateWindowDisplayState?) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text("\(Int(state?.window.percent ?? 0))%")
+                .font(.system(.title3, design: .rounded).bold().monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .opacity(state?.isEstimated == true ? 0.58 : 1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var inlineView: some View {
@@ -580,7 +585,7 @@ struct ProviderSummaryLockWidget: Widget {
             ProviderWidgetView(entry: entry)
         }
         .configurationDisplayName("Usage Summary")
-        .description("Session and weekly usage at a glance.")
+        .description("Session and weekly percentages of your busiest provider.")
         .supportedFamilies([.accessoryRectangular])
     }
 }
