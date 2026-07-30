@@ -40,6 +40,12 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 content
+                    // SwiftUI의 .refreshable은 손을 떼는 순간 태스크를 취소하고 인디케이터를
+                    // 접는다(iOS 17~26 재현) — UIKit UIRefreshControl을 직접 달아
+                    // 로드가 끝나 렌더된 뒤에만 인디케이터가 풀리게 한다
+                    .background(RefreshControlAttacher {
+                        await load(reloadWidgets: true)
+                    })
             }
             .background(ChargeTheme.background.ignoresSafeArea())
             .navigationTitle("Charge")
@@ -60,9 +66,6 @@ struct ContentView: View {
                 SettingsView(generatedAt: generatedAt, providers: providers, devices: devices,
                              snapshotEpoch: payloadEpoch)
             }
-            // 손을 일찍 떼면 SwiftUI가 refreshable 태스크를 취소하므로,
-            // 분리된 태스크로 실행해 실제 로드가 중간에 끊기지 않게 한다
-            .refreshable { await Task { await load(reloadWidgets: true) }.value }
             .task {
                 hidden = ChargeConfig.hiddenProviders
                 if !ChargeAuth.hasUsableData {
@@ -569,6 +572,9 @@ struct ContentView: View {
         return "\(provs)#today:\(today)#live:\(live)"
     }
 
+    // Swift 5 모드에서 nonisolated async는 백그라운드 실행자에서 돌므로 @State 변경이
+    // 메인 스레드를 벗어난다 — loading 인디케이터가 안 그려지는 원인. 명시적으로 메인에 격리한다.
+    @MainActor
     private func load(reloadWidgets: Bool = false) async {
         // 이미 로드 중이면 끝날 때까지 기다렸다가 새로 로드한다 (풀 리프레시가 즉시 끝나 보이는 것 방지)
         while loading {
@@ -636,6 +642,70 @@ struct ContentView: View {
                 providers = []
                 devices = []
                 generatedAt = nil
+            }
+        }
+    }
+}
+
+/// SwiftUI ScrollView의 배킹 UIScrollView에 UIKit UIRefreshControl을 단다.
+///
+/// SwiftUI의 `.refreshable`은 (iOS 17~26에서) 손을 떼는 순간 액션 태스크를 취소하고
+/// 인디케이터를 즉시 접어버려, "로드가 끝날 때까지 동글뱅이 유지"가 불가능하다.
+/// UIRefreshControl은 endRefreshing()을 부를 때까지 인디케이터가 유지되는 것이
+/// 보장되므로, 로드 완료(+상태 반영) 후에만 해제한다.
+private struct RefreshControlAttacher: UIViewRepresentable {
+    let onRefresh: @MainActor () async -> Void
+
+    func makeUIView(context: Context) -> HelperView {
+        let view = HelperView()
+        view.onRefresh = onRefresh
+        return view
+    }
+
+    func updateUIView(_ uiView: HelperView, context: Context) {
+        uiView.onRefresh = onRefresh
+    }
+
+    final class HelperView: UIView {
+        var onRefresh: (@MainActor () async -> Void)?
+        private weak var attached: UIScrollView?
+        private let control = UIRefreshControl()
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            attachIfNeeded()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            // didMoveToWindow 시점엔 아직 스크롤뷰 밖일 수 있고, SwiftUI가 렌더링 중
+            // refreshControl을 되돌릴 수도 있어 레이아웃마다 재확인한다
+            attachIfNeeded()
+        }
+
+        private func attachIfNeeded() {
+            guard window != nil else { return }
+            if attached == nil {
+                var ancestor = superview
+                while let current = ancestor, !(current is UIScrollView) {
+                    ancestor = current.superview
+                }
+                guard let scrollView = ancestor as? UIScrollView else { return }
+                control.addTarget(self, action: #selector(handleRefresh(_:)), for: .valueChanged)
+                attached = scrollView
+            }
+            // SwiftUI가 렌더링 중 refreshControl을 nil로 되돌리므로 매 레이아웃마다 복원한다
+            if let scrollView = attached, scrollView.refreshControl !== control {
+                scrollView.refreshControl = control
+            }
+        }
+
+        @objc private func handleRefresh(_ control: UIRefreshControl) {
+            // 분리된 태스크라 제스처/뷰 갱신에 취소되지 않고, 로드와 상태 반영이
+            // 끝난 뒤에야 endRefreshing으로 인디케이터를 해제한다
+            Task { @MainActor in
+                await onRefresh?()
+                control.endRefreshing()
             }
         }
     }

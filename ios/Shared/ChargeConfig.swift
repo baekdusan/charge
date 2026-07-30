@@ -71,6 +71,14 @@ enum ChargeConfig {
     /// App Group에 저장해 위젯도 같은 샘플 데이터를 보여준다. 전환은 setDemoMode로.
     static var demoMode: Bool { demoOverride ?? defaults.bool(forKey: "demoMode") }
 
+    /// UI 테스트 전용: 데모 조회에 인위적 지연(초)을 넣어 느린 네트워크에서의
+    /// 새로고침 인디케이터 동작을 관찰·검증할 수 있게 한다 (`-charge-demo-latency 3`)
+    static let demoLatency: Double? = {
+        guard let i = CommandLine.arguments.firstIndex(of: "-charge-demo-latency"),
+              CommandLine.arguments.indices.contains(i + 1) else { return nil }
+        return Double(CommandLine.arguments[i + 1])
+    }()
+
     /// 데모 모드 전환의 단일 경로 — 플래그와 함께 캐시·위젯을 항상 같이 정리한다.
     /// (콜사이트마다 정리 항목을 따로 기억하면 하나씩 빠뜨리게 된다)
     static func setDemoMode(_ on: Bool) {

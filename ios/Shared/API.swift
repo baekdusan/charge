@@ -122,7 +122,13 @@ enum ChargeAPI {
 
     static func fetchAll() async throws -> UsagePayload {
         // 데모 모드: 네트워크·로그인 없이 샘플 데이터 (위젯도 fetchAllOrCached를 거쳐 여기로 온다)
-        if ChargeConfig.demoMode { return DemoData.payload }
+        if ChargeConfig.demoMode {
+            // 느린 네트워크 흉내 — 취소 전파도 실제 URLSession처럼 겪도록 throw를 삼키지 않는다
+            if let s = ChargeConfig.demoLatency {
+                try await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000))
+            }
+            return DemoData.payload
+        }
         guard ChargeAuth.session != nil, let cloud = ChargeAuth.cloud else {
             throw ChargeError.notConfigured
         }
