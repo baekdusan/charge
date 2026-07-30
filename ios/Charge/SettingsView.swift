@@ -1,8 +1,10 @@
 import SwiftUI
+import StoreKit
 import WidgetKit
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.requestReview) private var requestReview
     @AppStorage("warnThreshold") private var warnThreshold = 70.0
     @AppStorage("critThreshold") private var critThreshold = 90.0
     @AppStorage("chartDays") private var chartDays = 14
@@ -265,7 +267,9 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Version", value: "1.0")
-                    LabeledContent("Name", value: "charge = battery + billing")
+                    // 시스템 별점 시트 (표시 여부는 iOS가 결정) — 앱스토어 등록 후
+                    // ...?action=write-review 딥링크로 바꾸면 항상 리뷰 화면이 열린다
+                    Button("Enjoying Charge? Leave a review") { requestReview() }
                     Link("GitHub repository", destination: URL(string: "https://github.com/baekdusan/charge")!)
                 } header: {
                     Text("About")

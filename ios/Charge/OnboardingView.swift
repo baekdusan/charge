@@ -166,9 +166,20 @@ struct OnboardingView: View {
                 }
             }
             StepCard(number: 3, title: "Connect this app") {
+                // 백그라운드 폴링이 조용히 돌고 있다는 것을 계속 보여준다 —
+                // 인디케이터가 없으면 연결될 때까지 멈춘 화면처럼 보인다
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(connectionCheckInFlight ? "Checking now…" : "Waiting for your computer to connect…")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.opacity)
+                }
+                .animation(.default, value: connectionCheckInFlight)
                 Text("It checks every few seconds and opens Charge as soon as your PC connects. Pull down to check now.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
                 Button {
                     Task {
                         _ = await checkAccountData(showProgress: true, showFailure: true)
