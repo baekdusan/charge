@@ -7,6 +7,9 @@ struct ChargeSession: Codable {
     var refreshToken: String
     var expiresAt: Date
     var email: String?
+    /// 세션을 발급한 백엔드 URL — CloudConfig가 다른 프로젝트로 바뀌면 이 세션은 무효다.
+    /// (없으면 구버전 저장분 = 어느 백엔드인지 모름 = 무효 취급해 재로그인 유도)
+    var cloudURL: String?
 }
 
 enum ChargeAuth {
@@ -28,15 +31,22 @@ enum ChargeAuth {
             .appendingPathComponent("session.json")
     }
 
-    /// 앱·위젯이 공유하는 세션 (App Group)
+    /// 앱·위젯이 공유하는 세션 (App Group).
+    /// 다른 백엔드에서 발급된 세션은 없는 것으로 취급한다 — 낡은 토큰으로 새 프로젝트의
+    /// RPC를 치면 401만 반복되고, 사용자는 원인 모를 "코드 발급 실패"를 보게 된다.
     static var session: ChargeSession? {
         get {
+            let stored: ChargeSession?
             if let url = sessionFileURL, let data = try? Data(contentsOf: url) {
-                return try? JSONDecoder().decode(ChargeSession.self, from: data)
+                stored = try? JSONDecoder().decode(ChargeSession.self, from: data)
+            } else if let data = ChargeConfig.defaults.data(forKey: "cloudSession") {
+                // 구버전 저장 위치(UserDefaults)에서 읽기 — 다음 저장 때 파일로 이행된다
+                stored = try? JSONDecoder().decode(ChargeSession.self, from: data)
+            } else {
+                stored = nil
             }
-            // 구버전 저장 위치(UserDefaults)에서 읽기 — 다음 저장 때 파일로 이행된다
-            guard let data = ChargeConfig.defaults.data(forKey: "cloudSession") else { return nil }
-            return try? JSONDecoder().decode(ChargeSession.self, from: data)
+            guard let stored, stored.cloudURL == cloud?.url.absoluteString else { return nil }
+            return stored
         }
         set {
             if let newValue, let data = try? JSONEncoder().encode(newValue) {
@@ -270,6 +280,7 @@ enum ChargeAuth {
         return ChargeSession(accessToken: tok.accessToken,
                              refreshToken: tok.refreshToken,
                              expiresAt: Date().addingTimeInterval(tok.expiresIn),
-                             email: tok.user?.email ?? session?.email)
+                             email: tok.user?.email ?? session?.email,
+                             cloudURL: cloud.url.absoluteString)
     }
 }
