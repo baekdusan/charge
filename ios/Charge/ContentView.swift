@@ -50,6 +50,7 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "gearshape")
                     }
+                    .accessibilityIdentifier("settingsButton")
                 }
             }
             .sheet(isPresented: $showSettings, onDismiss: {
@@ -64,7 +65,7 @@ struct ContentView: View {
             .refreshable { await Task { await load(reloadWidgets: true) }.value }
             .task {
                 hidden = ChargeConfig.hiddenProviders
-                if ChargeAuth.session == nil {
+                if !ChargeAuth.hasUsableData {
                     showOnboarding = true
                 }
                 await load(reloadWidgets: true)
@@ -74,7 +75,7 @@ struct ContentView: View {
                     } catch {
                         break
                     }
-                    if ChargeAuth.session != nil {
+                    if ChargeAuth.hasUsableData {
                         await load()
                     } else if !showOnboarding {
                         // 위젯 프로세스가 무효 세션을 감지해 로그아웃했을 수 있다 —
@@ -120,7 +121,8 @@ struct ContentView: View {
     }
 
     private var content: some View {
-        VStack(spacing: 16) {
+        let duplicates = duplicateProviderIds
+        return VStack(spacing: 16) {
             TimelineView(.periodic(from: .now, by: 30)) { context in
                 connectionStatus(at: context.date)
             }
@@ -132,7 +134,9 @@ struct ContentView: View {
                 .pickerStyle(.segmented)
             }
             todayCard
-            ForEach(visibleProviders.filter { pid == nil || $0.id == pid }, id: \.uid) { providerCard($0) }
+            ForEach(visibleProviders.filter { pid == nil || $0.id == pid }, id: \.uid) {
+                providerCard($0, duplicates: duplicates)
+            }
             if let live, pid == nil || pid == "claude" { liveCard(live) }
             streakCard
             chartCard
@@ -177,15 +181,18 @@ struct ContentView: View {
         providers.filter { !hidden.contains($0.id) }
     }
 
+    /// 같은 프로바이더가 계정별 카드로 2개 이상인 id 집합 — 카드마다 전체를 재스캔하지 않게 한 번만 계산
+    private var duplicateProviderIds: Set<String> {
+        var seen = Set<String>()
+        var dups = Set<String>()
+        for p in visibleProviders where !seen.insert(p.id).inserted { dups.insert(p.id) }
+        return dups
+    }
+
     /// 세그먼트용: 같은 프로바이더의 계정별 카드가 여러 개여도 세그먼트는 하나만
     private var segmentProviders: [Provider] {
         var seen = Set<String>()
         return visibleProviders.filter { seen.insert($0.id).inserted }
-    }
-
-    /// 같은 프로바이더가 계정별로 2개 이상일 때만 머신 이름을 보여준다
-    private func hasMultipleAccounts(_ p: Provider) -> Bool {
-        visibleProviders.filter { $0.id == p.id }.count > 1
     }
 
     /// last_seen이 갱신될 때마다 행이 뒤바뀌지 않게 이름 기준 고정 정렬
@@ -268,7 +275,7 @@ struct ContentView: View {
     private var streakCard: some View {
         let f = ChargeDate.day
         let costByDay = Dictionary(uniqueKeysWithValues: daily.map { ($0.period, $0.cost(for: pid)) })
-        let weeks = 10
+        let weeks = ChargeDate.streakWeeks
         let start = Calendar.current.date(byAdding: .day, value: -(weeks * 7 - 1), to: Date())!
         let maxCost = max(costByDay.values.max() ?? 0, 0.01)
         let todayRatio = (today?.cost(for: pid) ?? 0) / maxCost
@@ -308,7 +315,7 @@ struct ContentView: View {
         .cardStyle()
     }
 
-    private func providerCard(_ p: Provider) -> some View {
+    private func providerCard(_ p: Provider, duplicates: Set<String>) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 HStack(spacing: 6) {
@@ -325,7 +332,7 @@ struct ContentView: View {
                         .foregroundStyle(ChargeTheme.accent)
                         .background(ChargeTheme.accent.opacity(0.15), in: Capsule())
                 }
-                if hasMultipleAccounts(p), let device = p.deviceShortLabel {
+                if duplicates.contains(p.id), let device = p.deviceShortLabel {
                     Label(device, systemImage: "desktopcomputer")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -575,12 +582,15 @@ struct ContentView: View {
             let payload = try await ChargeAPI.fetchAll()
             daily = payload.daily
             live = payload.live
-            providers = payload.providers ?? []
+            // 사용자 순서는 데이터가 바뀔 때만 변한다 — 렌더마다가 아니라 로드 시 한 번 정렬
+            // (설정 시트에서 순서를 바꾸면 onDismiss의 load()가 다시 반영한다)
+            providers = ChargeConfig.sortedByUserOrder(payload.providers ?? [])
             devices = payload.devices ?? []
             payloadEpoch = epoch
             ChargeConfig.rememberProviders(providers)
             // 숨긴 프로바이더는 알림도 받지 않는다 — 설정 시트가 떠 있는 동안 이 뷰의
-            // hidden 상태는 갱신되지 않으므로, 공유 저장소의 최신 숨김 목록으로 거른다
+            // hidden 상태는 갱신되지 않으므로, 공유 저장소의 최신 숨김 목록으로 거른다.
+            // (데모 모드 처리는 reschedule 내부에서 — 예약 대신 기존 알림까지 정리한다)
             ResetNotifications.reschedule(
                 providers: providers.filter { !ChargeConfig.hiddenProviders.contains($0.id) },
                 warnThreshold: warnThreshold,

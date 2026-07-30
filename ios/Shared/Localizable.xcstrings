@@ -69,6 +69,106 @@
     "%@%%" : {
 
     },
+    "Browse the demo" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데모 둘러보기"
+          }
+        }
+      }
+    },
+    "Couldn't delete your account. Check your connection and try again." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "계정을 삭제하지 못했어요. 연결 상태를 확인하고 다시 시도해 주세요."
+          }
+        }
+      }
+    },
+    "Delete" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "삭제"
+          }
+        }
+      }
+    },
+    "Delete account" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "계정 삭제"
+          }
+        }
+      }
+    },
+    "Delete your account?" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "계정을 삭제할까요?"
+          }
+        }
+      }
+    },
+    "Exit demo mode" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데모 모드 종료"
+          }
+        }
+      }
+    },
+    "Sample data only — sign in anytime to see your real usage." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "샘플 데이터입니다. 언제든 로그인하면 내 실제 사용량을 볼 수 있어요."
+          }
+        }
+      }
+    },
+    "Toggles hide a provider from the app and widgets. Tap Edit to drag them into your preferred order. New tools appear here automatically." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "끄면 앱과 위젯에서 숨겨집니다. Edit을 누르면 드래그로 순서를 바꿀 수 있어요. 새 도구는 자동으로 이 목록에 나타납니다."
+          }
+        }
+      }
+    },
+    "You're viewing sample data. Exit to sign in and see your own usage." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지금은 샘플 데이터를 보고 있어요. 종료하고 로그인하면 내 사용량이 표시됩니다."
+          }
+        }
+      }
+    },
+    "Your account and all synced usage data are permanently deleted from the server. This cannot be undone." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "계정과 서버에 동기화된 모든 사용량 데이터가 영구 삭제됩니다. 되돌릴 수 없습니다."
+          }
+        }
+      }
+    },
     "⚡ On pace to run out in %@" : {
       "localizations" : {
         "ko" : {

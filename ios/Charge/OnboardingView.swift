@@ -1,7 +1,7 @@
 import SwiftUI
 import AuthenticationServices
 
-/// 첫 실행 셋업: Apple 로그인 → 페어링 코드 → `npx charge-collector <코드>` 한 줄.
+/// 첫 실행 셋업: Apple 로그인 → 페어링 코드 → `npx charge-connect <코드>` 한 줄.
 struct OnboardingView: View {
     @State private var signedIn = ChargeAuth.session != nil
     @State private var pairingCode: String?
@@ -84,6 +84,19 @@ struct OnboardingView: View {
             }
             .signInWithAppleButtonStyle(.white)
             .frame(height: 48)
+            Button {
+                // setDemoMode가 캐시 정리·위젯 리로드까지 함께 처리한다
+                ChargeConfig.setDemoMode(true)
+                onConnected()
+            } label: {
+                Text("Browse the demo")
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity, minHeight: 34)
+            }
+            .buttonStyle(.bordered)
+            Text("Sample data only — sign in anytime to see your real usage.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
             if let message {
                 Text(message)
                     .font(.caption)
@@ -130,7 +143,7 @@ struct OnboardingView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 if let pairingCode {
-                    TerminalBlock(prompt: "$", lines: ["npx charge-collector \(pairingCode)"])
+                    TerminalBlock(prompt: "$", lines: ["npx charge-connect \(pairingCode)"])
                     HStack {
                         Text("The code expires in 10 minutes.")
                             .font(.caption2)

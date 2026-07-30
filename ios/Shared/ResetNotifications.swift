@@ -121,7 +121,9 @@ enum ResetNotifications {
     }
 
     private static func performReschedule(providers: [Provider], warnThreshold: Double, sessionEpoch: Int) async {
-        guard enabled, ChargeAuth.session != nil else {
+        // 데모 모드에선 예약하지 않고, 남아 있던 실계정 알림도 지운다 —
+        // 가짜 리셋 시각으로 울리거나 데모 중에 실계정 알림이 도착하면 안 된다
+        guard enabled, ChargeAuth.session != nil, !ChargeConfig.demoMode else {
             performCancelAll()
             return
         }
@@ -181,8 +183,8 @@ enum ResetNotifications {
             ))
         }
         storedIDs = plannedIDs
-        // 예약하는 사이 로그아웃(다른 프로세스 포함)이나 토글 꺼짐이 있었으면 되돌린다
-        if !enabled || ChargeAuth.session == nil || ChargeAuth.sessionEpoch != sessionEpoch {
+        // 예약하는 사이 로그아웃(다른 프로세스 포함)·토글 꺼짐·데모 진입이 있었으면 되돌린다
+        if !enabled || ChargeAuth.session == nil || ChargeConfig.demoMode || ChargeAuth.sessionEpoch != sessionEpoch {
             performCancelAll()
         }
     }

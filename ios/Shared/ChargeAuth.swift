@@ -88,8 +88,7 @@ enum ChargeAuth {
     private static func finishSignOut() {
         ChargeConfig.defaults.set(sessionEpoch + 1, forKey: "sessionEpoch")
         ChargeAPI.clearCache()
-        ChargeConfig.defaults.removeObject(forKey: "knownProviders")
-        ChargeConfig.defaults.removeObject(forKey: "hiddenProviders")
+        ChargeConfig.resetAccountScoped()
         // 예약된 리셋 알림·프로바이더별 뮤트도 함께 제거 — 남겨두면 로그아웃 후
         // 이전 계정의 알림이 울리거나, 다음 계정에서 같은 id가 소리 없이 뮤트된다
         Task { @MainActor in ResetNotifications.cancelAll() }
@@ -196,19 +195,39 @@ enum ChargeAuth {
         return try await body()
     }
 
-    /// 수집기 페어링 코드 발급 (10분 유효, 일회용)
-    static func createPairingCode() async throws -> String {
+    /// "보여줄 데이터가 있는가" — 로그인 세션 또는 데모 모드.
+    /// 뷰가 session과 demoMode를 손으로 조합하면 극성이 갈라지기 쉬워 여기로 모은다.
+    /// ("로그인했는가"가 필요한 곳은 계속 session을 직접 본다 — 다른 질문이다.)
+    static var hasUsableData: Bool { session != nil || ChargeConfig.demoMode }
+
+    /// 인증된 PostgREST RPC 호출 (빈 인자) — 헤더 세트·성공 판정(2xx)의 정본
+    private static func rpc(_ name: String) async throws -> Data {
         guard let cloud else { throw ChargeError.notConfigured }
         let jwt = try await validAccessToken()
-        var req = URLRequest(url: cloud.url.appendingPathComponent("rest/v1/rpc/charge_create_pairing_code"))
+        var req = URLRequest(url: cloud.url.appendingPathComponent("rest/v1/rpc/\(name)"))
         req.httpMethod = "POST"
         req.setValue(cloud.anon, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = Data("{}".utf8)
         let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
-              let code = try? JSONDecoder().decode(String.self, from: data) else {
+        guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+        return data
+    }
+
+    /// 계정 삭제 (App Store 요건) — 서버의 auth.users 행을 지우면 사용량·기기·프로바이더
+    /// 데이터가 전부 cascade로 삭제된다. 성공하면 로컬도 로그아웃과 동일하게 정리한다.
+    static func deleteAccount() async throws {
+        _ = try await rpc("charge_delete_account")
+        signOut()
+    }
+
+    /// 수집기 페어링 코드 발급 (10분 유효, 일회용)
+    static func createPairingCode() async throws -> String {
+        let data = try await rpc("charge_create_pairing_code")
+        guard let code = try? JSONDecoder().decode(String.self, from: data) else {
             throw URLError(.badServerResponse)
         }
         return code

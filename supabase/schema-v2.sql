@@ -298,3 +298,19 @@ grant execute on function public.charge_claim_pairing_code(text, text) to anon, 
 
 revoke execute on function public.charge_upload(text, jsonb, jsonb, jsonb) from public;
 grant execute on function public.charge_upload(text, jsonb, jsonb, jsonb) to anon, authenticated;
+
+-- MARK: 계정 삭제 (App Store 심사 요건)
+-- 본인 auth.users 행을 지우면 charge_* 데이터가 전부 on delete cascade로 정리된다.
+create or replace function public.charge_delete_account()
+returns void
+language plpgsql security definer set search_path = public, extensions
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+  delete from auth.users where id = auth.uid();
+end $$;
+
+revoke execute on function public.charge_delete_account() from public;
+grant execute on function public.charge_delete_account() to authenticated;

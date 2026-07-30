@@ -1,4 +1,5 @@
 import SwiftUI
+import WidgetKit
 
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
@@ -8,6 +9,8 @@ struct SettingsView: View {
     @State private var hidden = ChargeConfig.hiddenProviders
     @State private var showGuide = false
     @State private var accountRefresh = 0
+    @State private var showDeleteConfirm = false
+    @State private var deleteError: String?
     @State private var deviceToRemove: CollectorDevice?
     @State private var showUnpairConfirm = false
     @State private var removedDeviceIDs: Set<String> = []
@@ -42,6 +45,7 @@ struct SettingsView: View {
 
     /// 페이로드의 프로바이더 + 과거에 관측했지만 지금은 빠진 프로바이더.
     /// 숨겼거나 수집이 잠시 실패해도 토글이 목록에서 사라지지 않는다.
+    /// 드래그로 정한 순서를 그대로 따른다 — 메인 화면·위젯과 같은 정렬 헬퍼를 쓴다.
     private var providerRows: [(id: String, name: String)] {
         // 계정별 카드가 여러 개여도 표시 토글은 프로바이더당 하나
         var seen = Set<String>()
@@ -52,15 +56,28 @@ struct SettingsView: View {
             .filter { id, _ in !seen.contains(id) }
             .sorted { $0.key < $1.key }
         rows.append(contentsOf: missing.map { (id: $0.key, name: $0.value) })
-        return rows
+        return ChargeConfig.sortedByUserOrder(rows, id: \.id)
     }
 
     var body: some View {
-        NavigationStack {
+        // 렌더당 한 번만 계산 — 이 목록은 토글·드래그마다 재평가되는 경로다
+        let rows = providerRows
+        return NavigationStack {
             Form {
-                if !providerRows.isEmpty {
+                if ChargeConfig.demoMode {
                     Section {
-                        ForEach(providerRows, id: \.id) { p in
+                        Button("Exit demo mode") {
+                            ChargeConfig.setDemoMode(false)
+                            dismiss()
+                        }
+                    } footer: {
+                        Text("You're viewing sample data. Exit to sign in and see your own usage.")
+                    }
+                }
+
+                if !rows.isEmpty {
+                    Section {
+                        ForEach(rows, id: \.id) { p in
                             Toggle(p.name, isOn: Binding(
                                 get: { !hidden.contains(p.id) },
                                 set: { on in
@@ -76,17 +93,33 @@ struct SettingsView: View {
                                 }
                             ))
                         }
+                        .onMove { source, destination in
+                            var ids = rows.map(\.id)
+                            ids.move(fromOffsets: source, toOffset: destination)
+                            ChargeConfig.providerOrder = ids
+                            accountRefresh += 1  // 재렌더 트리거 (rows가 저장소를 읽으므로)
+                            // 위젯도 같은 순서를 쓴다 — 닫기를 기다리지 않고 즉시 반영
+                            WidgetCenter.shared.reloadAllTimelines()
+                        }
                     } header: {
-                        Text("Providers")
+                        HStack {
+                            Text("Providers")
+                            Spacer()
+                            if rows.count > 1 {
+                                EditButton()
+                                    .font(.caption)
+                                    .textCase(nil)
+                            }
+                        }
                     } footer: {
-                        Text("Hidden providers disappear from the app and widgets. New tools are detected by the desktop collector and appear here automatically.")
+                        Text("Toggles hide a provider from the app and widgets. Tap Edit to drag them into your preferred order. New tools appear here automatically.")
                     }
                 }
 
                 Section {
                     Toggle("Limit reset notifications", isOn: $resetAlerts)
                     if resetAlerts {
-                        ForEach(providerRows, id: \.id) { p in
+                        ForEach(rows, id: \.id) { p in
                             Toggle(p.name, isOn: Binding(
                                 get: { !mutedAlerts.contains(p.id) },
                                 set: { on in
@@ -182,24 +215,23 @@ struct SettingsView: View {
                 }
 
                 if ChargeAuth.cloud != nil {
-                    Section("Account") {
+                    Section {
                         if let session = ChargeAuth.session {
                             LabeledContent("Signed in", value: session.email ?? "Apple ID")
                             Button("Sign out", role: .destructive) {
                                 ChargeAuth.signOut()
-                                // 계정 귀속 로컬 상태도 함께 리셋 — nil이 아니라 빈 목록으로,
-                                // nil이면 visibleDevices가 이전 계정의 부모 스냅샷으로 폴백해
-                                // 옛 기기 목록과 해제 버튼이 그대로 노출된다
-                                mutedAlerts = []
-                                refreshedDevices = []
-                                refreshedProviders = []
-                                refreshedEpoch = nil
-                                removedDeviceIDs = []
-                                deviceError = nil
-                                accountRefresh += 1
+                                resetAccountLocalState()
                             }
+                            Button("Delete account", role: .destructive) { showDeleteConfirm = true }
                         } else {
                             Button("Sign in") { showGuide = true }
+                        }
+                    } header: {
+                        Text("Account")
+                    } footer: {
+                        if let deleteError {
+                            Text(deleteError)
+                                .foregroundStyle(.red)
                         }
                     }
                     .id(accountRefresh)
@@ -267,6 +299,12 @@ struct SettingsView: View {
             } message: { _ in
                 Text("Usage history uploaded by this computer will also be deleted. Its collector stops syncing until you pair it again.")
             }
+            .alert("Delete your account?", isPresented: $showDeleteConfirm) {
+                Button("Delete", role: .destructive) { deleteAccount() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Your account and all synced usage data are permanently deleted from the server. This cannot be undone.")
+            }
         }
         .preferredColorScheme(.dark)
         .tint(ChargeTheme.accent)
@@ -305,6 +343,31 @@ struct SettingsView: View {
             Button("Unpair", role: .destructive) {
                 deviceToRemove = device
                 showUnpairConfirm = true
+            }
+        }
+    }
+
+    /// 로그아웃·계정 삭제 공통: 계정에 귀속된 이 화면의 로컬 상태 리셋.
+    /// nil이 아니라 빈 목록으로 — nil이면 visibleDevices가 이전 계정의
+    /// 부모 스냅샷으로 폴백해 옛 기기 목록과 해제 버튼이 그대로 노출된다.
+    private func resetAccountLocalState() {
+        mutedAlerts = []
+        refreshedDevices = []
+        refreshedProviders = []
+        refreshedEpoch = nil
+        removedDeviceIDs = []
+        deviceError = nil
+        accountRefresh += 1
+    }
+
+    private func deleteAccount() {
+        deleteError = nil
+        Task {
+            do {
+                try await ChargeAuth.deleteAccount()
+                resetAccountLocalState()
+            } catch {
+                deleteError = String(localized: "Couldn't delete your account. Check your connection and try again.")
             }
         }
     }

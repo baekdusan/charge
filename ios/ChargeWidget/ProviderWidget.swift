@@ -69,40 +69,13 @@ struct ProviderEntry: TimelineEntry {
     fileprivate let style: ProviderWidgetStyle
 }
 
-private func sampleWindow(percent: Double, minutes: Int, elapsed: Double) -> RateWindow {
-    let remaining = Double(minutes) * 60 * (1 - elapsed)
-    return RateWindow(
-        percent: percent,
-        resetsAt: ISO8601DateFormatter().string(from: Date().addingTimeInterval(remaining)),
-        windowMinutes: minutes
-    )
-}
-
-private var sampleProviders: [Provider] {
-    [
-        Provider(
-            id: "claude",
-            name: "Claude",
-            plan: "Max 20x",
-            session: sampleWindow(percent: 34, minutes: 300, elapsed: 0.61),
-            weekly: sampleWindow(percent: 62, minutes: 10_080, elapsed: 0.42),
-            extras: nil,
-            status: nil
-        ),
-        Provider(
-            id: "codex",
-            name: "Codex",
-            plan: "Education",
-            session: sampleWindow(percent: 78, minutes: 300, elapsed: 0.48),
-            weekly: sampleWindow(percent: 51, minutes: 10_080, elapsed: 0.76),
-            extras: nil,
-            status: nil
-        ),
-    ]
-}
+/// 위젯 갤러리 프리뷰용 샘플 — 데모 모드와 같은 정본(DemoData)을 쓴다
+private var sampleProviders: [Provider] { DemoData.payload.providers ?? [] }
 
 private func selectedProviders(_ providers: [Provider], selection: [ProviderEntity]) -> [Provider] {
-    let visible = providers.filter { !ChargeConfig.isHidden($0.id) }
+    // 앱 설정의 드래그 순서를 위젯에도 동일하게 적용한다 (숨김 목록은 한 번만 읽는다)
+    let hidden = ChargeConfig.hiddenProviders
+    let visible = ChargeConfig.sortedByUserOrder(providers.filter { !hidden.contains($0.id) })
     guard !selection.isEmpty else { return visible }
     let ids = Set(selection.map(\.id))
     return visible.filter { ids.contains($0.id) }

@@ -12,6 +12,9 @@ enum ChargeDate {
     }()
 
     static func todayString() -> String { day.string(from: Date()) }
+
+    /// 스트릭(잔디) 그리드의 폭 — 표시부(ContentView)와 데모 데이터 생성부가 같은 값을 쓴다
+    static let streakWeeks = 10
 }
 
 struct DailyUsage: Codable, Identifiable {
