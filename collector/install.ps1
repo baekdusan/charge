@@ -2,10 +2,13 @@
 # 실행: PowerShell에서 .\install.ps1  (실행 정책 오류 시: powershell -ExecutionPolicy Bypass -File install.ps1)
 $ErrorActionPreference = "Stop"
 
-$taskName = "ChargeCollector"
+$taskName = "ChargeConnect"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $node = (Get-Command node).Source
-$log = Join-Path $env:USERPROFILE "charge-collector.log"
+$log = Join-Path $env:USERPROFILE "charge-connect.log"
+
+# 예전 이름(ChargeCollector)으로 등록된 잔재가 있으면 정리
+Unregister-ScheduledTask -TaskName "ChargeCollector" -Confirm:$false -ErrorAction SilentlyContinue
 
 # cmd /c 로 감싸 로그 리다이렉션 (작업 스케줄러는 자체 리다이렉션이 없음)
 $arg = "/c `"`"$node`" `"$scriptDir\collect.js`" >> `"$log`" 2>&1`""

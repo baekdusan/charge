@@ -45,7 +45,7 @@ Charge는 데스크톱의 사용량 데이터를 가벼운 수집기로 모아 *
 1. iPhone에 Charge 설치 후 **Apple로 로그인**
 2. 앱이 보여주는 명령을 컴퓨터 터미널에 붙여넣기:
    ```bash
-   npx charge-collector <페어링코드>
+   npx charge-connect <페어링코드>
    ```
 3. 끝. 페어링, 첫 수집, 5분 간격 자동 수집 등록까지 한 번에 됩니다.
 
@@ -77,16 +77,16 @@ open Charge.xcodeproj
 
 | 작업 | 명령 |
 |------|------|
-| 수동 수집 1회 | `npx charge-collector run` |
-| 수집기 로그 (macOS) | `tail -f ~/Library/Logs/charge-collector.log` |
-| 수집기 로그 (Windows) | `%USERPROFILE%\charge-collector.log` |
-| 수집기 해제 (macOS) | `launchctl unload ~/Library/LaunchAgents/com.charge.collector.plist` |
-| 수집기 해제 (Windows) | `Unregister-ScheduledTask -TaskName ChargeCollector` |
-| 페어링 해제 | `npx charge-collector unpair` |
+| 수동 수집 1회 | `npx charge-connect run` |
+| 수집기 로그 (macOS) | `tail -f ~/Library/Logs/charge-connect.log` |
+| 수집기 로그 (Windows) | `%USERPROFILE%\charge-connect.log` |
+| 수집기 해제 (macOS) | `launchctl unload ~/Library/LaunchAgents/com.charge.connect.plist` |
+| 수집기 해제 (Windows) | `Unregister-ScheduledTask -TaskName ChargeConnect` |
+| 페어링 해제 | `npx charge-connect unpair` |
 
 ## 여러 컴퓨터에서 쓰기
 
-앱 설정의 "다른 컴퓨터 페어링"으로 코드를 새로 발급받아 각 머신에서 `npx charge-collector <코드>`를 실행하면 됩니다.
+앱 설정의 "다른 컴퓨터 페어링"으로 코드를 새로 발급받아 각 머신에서 `npx charge-connect <코드>`를 실행하면 됩니다.
 
 일별 비용/토큰은 **머신별 행으로 따로 저장되고 앱이 날짜별로 합산**해 보여줍니다. 맥북에서 $40, 맥미니에서 $10을 썼다면 앱에는 $50으로 표시되고, 어느 한 대가 꺼져 있어도 다른 머신의 기록은 유지됩니다. 레이트리밋과 플랜은 계정 단위 값이라 어떤 머신이 올려도 항상 최신입니다.
 

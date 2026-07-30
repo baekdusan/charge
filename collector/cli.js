@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// charge-collector CLI — 앱에서 받은 페어링 코드로 연결하고 자동 수집을 등록한다.
+// charge-connect CLI — 앱에서 받은 페어링 코드로 연결하고 자동 수집을 등록한다.
 //
 // 사용법:
-//   npx charge-collector <페어링코드>   # 페어링 + 첫 수집 + 스케줄 등록 (일반 사용자용 원라이너)
-//   charge-collector run               # 수집 1회 (스케줄러가 호출)
-//   charge-collector unpair            # 페어링 해제
+//   npx charge-connect <페어링코드>   # 페어링 + 첫 수집 + 스케줄 등록 (일반 사용자용 원라이너)
+//   charge-connect run               # 수집 1회 (스케줄러가 호출)
+//   charge-connect unpair            # 페어링 해제
 //
 // 설정 파일: ~/.charge/config.json (CHARGE_HOME으로 위치 변경 가능)
 
@@ -84,7 +84,7 @@ function installSchedule() {
 (async () => {
   const arg = process.argv[2];
   if (!arg) {
-    console.error("사용법: npx charge-collector <페어링코드>  (앱 온보딩에서 코드 발급)");
+    console.error("사용법: npx charge-connect <페어링코드>  (앱 온보딩에서 코드 발급)");
     process.exit(1);
   }
   if (arg === "run") {

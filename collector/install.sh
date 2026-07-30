@@ -2,12 +2,19 @@
 # launchd에 수집기를 등록한다 (5분 간격).
 set -euo pipefail
 
-LABEL="com.charge.collector"
+LABEL="com.charge.connect"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOG="$HOME/Library/Logs/charge-collector.log"
+LOG="$HOME/Library/Logs/charge-connect.log"
 
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
+
+# 예전 이름(charge-collector)으로 등록된 잔재가 있으면 정리
+OLD_PLIST="$HOME/Library/LaunchAgents/com.charge.collector.plist"
+if [ -f "$OLD_PLIST" ]; then
+  launchctl unload "$OLD_PLIST" 2>/dev/null || true
+  rm -f "$OLD_PLIST"
+fi
 
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

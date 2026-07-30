@@ -1,9 +1,9 @@
 {
-  "name": "charge-collector",
-  "version": "0.1.0",
-  "description": "Desktop collector for the Charge iPhone app \u2014 uploads AI coding usage to Charge",
+  "name": "charge-connect",
+  "version": "0.1.1",
+  "description": "Connects your computer to the Charge iPhone app and uploads AI coding usage",
   "bin": {
-    "charge-collector": "./cli.js"
+    "charge-connect": "cli.js"
   },
   "scripts": {
     "test": "node --test collect.test.js"
@@ -21,6 +21,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/baekdusan/charge"
+    "url": "git+https://github.com/baekdusan/charge.git"
   }
 }
