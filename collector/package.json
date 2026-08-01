@@ -1,6 +1,6 @@
 {
   "name": "charge-connect",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Connects your computer to the Charge iPhone app and uploads AI coding usage",
   "bin": {
     "charge-connect": "cli.js"
