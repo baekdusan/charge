@@ -86,6 +86,21 @@ jobs:
           exit 0
 
       # ── 4. 작업 스케줄러 등록 ────────────────────────────────────────
+      # cli.js 는 powershell.exe(= Windows PowerShell 5.1)를 부른다. 5.1 은 BOM 없는 파일을
+      # 시스템 ANSI 코드페이지로 읽어서 한글 안내가 전부 깨진다. 근본 원인은 파일 인코딩이므로
+      # 바이트로 검사하고, 5.1 이 실제로 온전히 읽는지도 확인한다.
+      - name: install.ps1 한글 인코딩 (Windows PowerShell 5.1)
+        working-directory: collector
+        run: |
+          node -e "const fs=require('fs');const b=fs.readFileSync('install.ps1');if(b[0]!==0xEF||b[1]!==0xBB||b[2]!==0xBF)throw new Error('UTF-8 BOM 없음 — PS 5.1이 한글을 깨뜨린다');if(!b.toString('utf8').includes('등록 완료'))throw new Error('한글 문구 손상');console.log('BOM + 한글 OK')"
+          # 명령줄에 한글을 싣지 않으려고 코드포인트로 비교하고, 결과는 UTF-8 파일로 받는다
+          $cmd = '$s = Get-Content -Raw .\install.ps1; $t = [char]0xB4F1 + [char]0xB85D; $r = if ($s -match $t) { "KO-OK" } else { "KO-BROKEN" }; $r | Out-File -Encoding utf8 ko-probe.txt'
+          powershell -NoProfile -ExecutionPolicy Bypass -Command $cmd
+          $r = (Get-Content ko-probe.txt -Raw).Trim()
+          Write-Host "probe=$r"
+          if ($r -ne 'KO-OK') { throw "Windows PowerShell 5.1이 install.ps1의 한글을 못 읽는다" }
+          Remove-Item -Force ko-probe.txt
+
       - name: install.ps1 — 스케줄 등록
         working-directory: collector
         run: |
@@ -117,16 +132,30 @@ jobs:
       - name: 등록된 명령줄이 실제로 도는지 (cmd 따옴표 검증)
         run: |
           $a = (Get-ScheduledTask -TaskName ChargeConnect).Actions[0]
-          # 스케줄러가 넣는 것과 동일한 인자로 cmd.exe 를 직접 실행
-          Stop-ScheduledTask -TaskName ChargeConnect -ErrorAction SilentlyContinue
-          $p = Start-Process -FilePath $a.Execute -ArgumentList $a.Arguments -NoNewWindow -Wait -PassThru
           $log = Join-Path $env:USERPROFILE ".charge\collector.log"
-          if (-not (Test-Path $log)) { throw "로그 파일이 안 생김 → cmd 따옴표가 깨졌을 가능성" }
           if (Test-Path (Join-Path $env:USERPROFILE "charge-connect.log")) {
             throw "예전 위치의 로그가 안 지워짐"
           }
-          Write-Host "--- charge-connect.log ---"
-          Get-Content $log | Select-Object -Last 40
+
+          # install.ps1 이 Start-ScheduledTask 로 이미 한 번 돌려놨다. 그게 끝나기를 기다린 뒤
+          # 작업을 꺼야 한다 — 겹치면 cmd 의 >> 가 로그를 못 열어 리다이렉션이 통째로 실패하고,
+          # 그러면 이 검증이 엉뚱한 이유로 통과해버린다.
+          Stop-ScheduledTask -TaskName ChargeConnect -ErrorAction SilentlyContinue
+          Disable-ScheduledTask -TaskName ChargeConnect | Out-Null
+          $deadline = (Get-Date).AddMinutes(5)
+          while ((Get-ScheduledTask -TaskName ChargeConnect).State -eq 'Running' -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 5
+          }
+          Remove-Item -Force -ErrorAction SilentlyContinue $log
+
+          # 스케줄러가 넣는 것과 동일한 인자로 cmd.exe 를 직접 실행
+          $p = Start-Process -FilePath $a.Execute -ArgumentList $a.Arguments -NoNewWindow -Wait -PassThru
+          if (-not (Test-Path $log)) { throw "로그 파일이 안 생김 → cmd 따옴표가 깨졌을 가능성" }
+          $content = Get-Content $log -Raw
+          Write-Host "--- collector.log ---"
+          Write-Host $content
+          if ([string]::IsNullOrWhiteSpace($content)) { throw "로그가 비었다 — 리다이렉션이 안 걸렸다" }
+          if ($content -notmatch '페어링') { throw "collect.js 출력이 로그에 안 잡혔다" }
           # 페어링이 없으니 exit 1 이 정상. 그 외 코드는 경로/따옴표 문제를 의심한다.
           Write-Host "cmd exit=$($p.ExitCode)"
           if ($p.ExitCode -ne 1) { throw "기대값 1(미페어링), 실제 $($p.ExitCode)" }

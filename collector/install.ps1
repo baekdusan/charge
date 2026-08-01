@@ -1,4 +1,4 @@
-# Charge 수집기를 Windows 작업 스케줄러에 등록한다 (5분 간격).
+﻿# Charge 수집기를 Windows 작업 스케줄러에 등록한다 (5분 간격).
 # 실행: PowerShell에서 .\install.ps1  (실행 정책 오류 시: powershell -ExecutionPolicy Bypass -File install.ps1)
 $ErrorActionPreference = "Stop"
 
