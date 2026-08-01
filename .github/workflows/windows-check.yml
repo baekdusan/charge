@@ -25,8 +25,12 @@ jobs:
         run: |
           node -v
           Write-Host "USERPROFILE=$env:USERPROFILE"
-          Write-Host "HOME=$env:HOME"
           Write-Host "ExecutionPolicy=$(Get-ExecutionPolicy)"
+          # HOME 이 미설정인지 빈 문자열인지 구분한다.
+          # 빈 문자열이면 `process.env.HOME ?? process.env.USERPROFILE` 가 폴백하지 않고
+          # ""를 그대로 써서 ~/.charge 가 상대경로 ".charge" 로 잡힌다.
+          node -e "console.log('HOME=' + JSON.stringify(process.env.HOME), 'USERPROFILE=' + JSON.stringify(process.env.USERPROFILE))"
+          node -e "const p=require('path');console.log('CONF_DIR =', p.join(process.env.HOME ?? process.env.USERPROFILE, '.charge'))"
 
       # ── 1. 유닛 테스트 ────────────────────────────────────────────────
       - name: collect.test.js
@@ -38,9 +42,11 @@ jobs:
         working-directory: collector
         run: |
           $out = node cli.js 2>&1 | Out-String
+          $code = $LASTEXITCODE
           Write-Host $out
-          if ($LASTEXITCODE -ne 1) { throw "exit code 기대값 1, 실제 $LASTEXITCODE" }
+          if ($code -ne 1) { throw "exit code 기대값 1, 실제 $code" }
           if ($out -notmatch 'charge-connect') { throw "사용법 문구가 안 나옴" }
+          exit 0   # node 의 exit 1 이 스텝 결과로 새어나가지 않게
 
       - name: cli.js unpair — CHARGE_HOME 아래 config.json 제거
         working-directory: collector
@@ -73,9 +79,11 @@ jobs:
           CHARGE_HOME: ${{ runner.temp }}\empty-home
         run: |
           $out = node collect.js 2>&1 | Out-String
+          $code = $LASTEXITCODE
           Write-Host $out
-          if ($LASTEXITCODE -ne 1) { throw "exit code 기대값 1, 실제 $LASTEXITCODE" }
+          if ($code -ne 1) { throw "exit code 기대값 1, 실제 $code" }
           if ($out -notmatch '페어링') { throw "페어링 안내 문구가 없음" }
+          exit 0
 
       # ── 4. 작업 스케줄러 등록 ────────────────────────────────────────
       - name: install.ps1 — 스케줄 등록
@@ -116,12 +124,11 @@ jobs:
           Write-Host "cmd exit=$($p.ExitCode)"
           if ($p.ExitCode -ne 1) { throw "기대값 1(미페어링), 실제 $($p.ExitCode)" }
 
-      - name: ~/.charge/app 런타임 사본 확인
+      - name: task가 가리키는 경로 기록
         run: |
-          # install.ps1 은 스크립트가 놓인 자리에서 collect.js 를 찾는다.
-          # 실사용 경로(cli.js 가 복사하는 ~/.charge/app)와 같은 구조인지 본다.
-          $dir = Split-Path -Parent (Get-ScheduledTask -TaskName ChargeConnect).Actions[0].Arguments
-          Write-Host "task가 가리키는 collect.js: $((Get-ScheduledTask -TaskName ChargeConnect).Actions[0].Arguments)"
+          # install.ps1 은 자기 자신이 놓인 자리에서 collect.js 를 찾는다.
+          # 실사용 경로는 cli.js 가 복사해두는 ~/.charge/app 이다.
+          Write-Host (Get-ScheduledTask -TaskName ChargeConnect).Actions[0].Arguments
 
       # ── 5. Node 없는 환경에서의 실패 메시지 ──────────────────────────
       - name: install.ps1 — PATH에 node가 없을 때
@@ -133,6 +140,7 @@ jobs:
           if ($out -match 'Get-Command') {
             Write-Host "::warning::node가 없으면 PowerShell 원문 에러가 그대로 노출된다 (안내 문구 필요)"
           }
+          exit 0
 
       - name: 정리
         if: always()
