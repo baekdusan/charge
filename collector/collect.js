@@ -22,6 +22,11 @@ const HOME = process.env.HOME ?? process.env.USERPROFILE;
 // 5분마다 도는 작업이라 그냥 이어 붙이면 끝없이 자라므로 5MB에서 .old로 민다.
 const logArg = process.argv.indexOf("--log");
 const LOG_FILE = logArg > -1 ? process.argv[logArg + 1] : null;
+if (logArg > -1 && (!LOG_FILE || LOG_FILE.startsWith("-"))) {
+  // 값을 안 주면 조용히 로그가 꺼지고, 다음 옵션을 삼키면 "--dry-run"이라는 파일에 쓰게 된다
+  console.error("--log 뒤에는 파일 경로가 필요합니다.");
+  process.exit(1);
+}
 if (LOG_FILE) {
   try {
     if (fs.statSync(LOG_FILE).size > 5 * 1024 * 1024) fs.renameSync(LOG_FILE, `${LOG_FILE}.old`);
@@ -34,6 +39,14 @@ if (LOG_FILE) {
   };
   console.log = write;
   console.error = write;
+  // 스케줄러가 돌릴 때는 Node 기본 stderr가 어디에도 안 남는다. 잡지 않으면
+  // 크래시했을 때 로그에 시작 줄만 덩그러니 남아 원인을 알 수 없다.
+  const fatal = (label) => (err) => {
+    write(`[${new Date().toISOString()}] ${label}: ${err?.stack ?? err}`);
+    process.exit(1);
+  };
+  process.on("uncaughtException", fatal("치명적 오류"));
+  process.on("unhandledRejection", fatal("처리되지 않은 거부"));
   // 시작 줄을 바로 남긴다 — '언제 마지막으로 돌았나'를 알 수 있고,
   // install.ps1이 스케줄 작업이 실제로 떴는지 판정하는 근거이기도 하다.
   write(`[${new Date().toISOString()}] 수집 시작`);

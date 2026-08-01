@@ -108,26 +108,38 @@ function installSchedule(dir) {
 
   console.log("5분 간격 자동 수집을 등록합니다…");
   let scheduled = true;
+  let guided = false; // 설치 스크립트가 수동 등록 방법을 이미 출력했다 (종료 코드 3)
   try {
     installSchedule(dir);
   } catch (e) {
     scheduled = false;
-    console.error(`자동 수집 등록 실패: ${e.message ?? e}`);
+    if (e.status === 3) guided = true;
+    else console.error(`자동 수집 등록 실패: ${e.message ?? e}`);
   }
 
   console.log("첫 수집을 실행합니다…");
+  let collected = true;
   try {
     collect(dir);
   } catch {
+    collected = false;
     console.error("첫 수집에 실패했습니다 (네트워크 문제일 수 있습니다).");
-    if (scheduled) console.error("5분 뒤 자동으로 다시 시도합니다.");
   }
 
   if (!scheduled) {
-    const p = path.join(dir, INSTALLER);
-    console.error("페어링은 끝났습니다. 자동 수집 등록만 위 안내를 따라 직접 마무리해주세요.");
-    console.error(`  다시 시도: ${WIN ? `powershell -ExecutionPolicy Bypass -File "${p}"` : `bash "${p}"`}`);
+    if (guided) {
+      console.error("페어링은 끝났습니다. 위 안내대로 자동 수집을 등록하면 완료됩니다.");
+    } else {
+      const p = path.join(dir, INSTALLER);
+      console.error("페어링은 끝났습니다. 자동 수집 등록만 직접 마무리해주세요.");
+      console.error(`  다시 시도: ${WIN ? `powershell -ExecutionPolicy Bypass -File "${p}"` : `bash "${p}"`}`);
+    }
     process.exit(1);
+  }
+  // 첫 수집이 실패했으면 앱에 아직 데이터가 없다 — 됐다고 말하지 않는다
+  if (!collected) {
+    console.log("✓ 페어링과 자동 수집 등록은 끝났습니다. 5분 뒤 수집을 다시 시도합니다.");
+    return;
   }
   console.log("✓ 설정 끝! 이제 앱에서 데이터가 보입니다.");
 })().catch((e) => {

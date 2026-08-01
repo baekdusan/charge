@@ -251,24 +251,43 @@ jobs:
         working-directory: collector
         run: node --test collect.test.js
 
-      - name: install.linux.sh — launchctl 을 부르지 않는다
+      # 경로에 공백을 넣어 돌린다 — systemd 는 ExecStart 를 공백으로 쪼개므로
+      # 인용이 빠지면 --log 인자가 두 동강 난다.
+      - name: install.linux.sh — 등록 결과 검증 (공백 든 경로)
         working-directory: collector
+        env:
+          CHARGE_HOME: '${{ runner.temp }}/charge home (test)'
         run: |
           if grep -q launchctl install.linux.sh; then
             echo "launchctl 호출이 남아 있다"; exit 1
           fi
           bash -n install.linux.sh
+          mkdir -p "$CHARGE_HOME"
           set +e
           out=$(bash install.linux.sh 2>&1); code=$?
           set -e
           echo "$out"
           echo "exit=$code"
-          # 러너에는 systemd 사용자 세션이 없다 → cron 안내 + 종료 코드 3 이 정상
-          if [ "$code" != "0" ] && [ "$code" != "3" ]; then
+          log="$CHARGE_HOME/collector.log"
+          if [ "$code" = "0" ]; then
+            unit="$HOME/.config/systemd/user/charge-connect.service"
+            [ -f "$unit" ] || { echo "service 유닛이 없다"; exit 1; }
+            cat "$unit"
+            grep -qF -- "--log \"$log\"" "$unit" || { echo "공백 경로가 인용되지 않았다"; exit 1; }
+            systemctl --user is-enabled charge-connect.timer
+            # 타이머가 아니라 서비스를 직접 한 번 돌려 유닛이 실제로 실행 가능한지 본다
+            systemctl --user start charge-connect.service || true
+            for _ in $(seq 1 30); do [ -f "$log" ] && break; sleep 1; done
+            [ -f "$log" ] || { echo "유닛이 로그를 안 남겼다 — ExecStart 가 안 먹었다"; exit 1; }
+            grep -q "수집 시작" "$log" || { echo "시작 줄이 없다"; exit 1; }
+            cat "$log"
+            systemctl --user disable --now charge-connect.timer
+          elif [ "$code" = "3" ]; then
+            # systemd 사용자 세션이 없는 환경 (WSL 등) — cron 안내가 나와야 한다
+            echo "$out" | grep -q crontab || { echo "cron 안내가 없다"; exit 1; }
+            echo "$out" | grep -qF -- "--log '$log'" || { echo "cron 줄의 경로가 인용되지 않았다"; exit 1; }
+          else
             echo "예상 못한 종료 코드"; exit 1
-          fi
-          if [ "$code" = "3" ] && ! echo "$out" | grep -q crontab; then
-            echo "cron 안내가 없다"; exit 1
           fi
 
       - name: cli.js 가 리눅스용 스크립트를 고르고 패키지에도 들어간다

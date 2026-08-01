@@ -27,7 +27,7 @@ Description=Charge usage collector
 
 [Service]
 Type=oneshot
-ExecStart=$NODE $SCRIPT_DIR/collect.js --log $LOG
+ExecStart="$NODE" "$SCRIPT_DIR/collect.js" --log "$LOG"
 EOF
 
   cat > "$UNIT_DIR/charge-connect.timer" <<EOF
@@ -54,7 +54,7 @@ fi
 echo "systemd 사용자 세션을 찾지 못했습니다 (WSL에서는 흔한 일입니다)."
 echo "아래 한 줄을 crontab에 넣으면 5분마다 수집합니다:"
 echo
-echo "  */5 * * * * $NODE $SCRIPT_DIR/collect.js --log $LOG"
+echo "  */5 * * * * '$NODE' '$SCRIPT_DIR/collect.js' --log '$LOG'"
 echo
 echo "등록: crontab -e   (cron이 안 돌고 있으면: sudo service cron start)"
 exit 3
