@@ -12,6 +12,7 @@
     "cli.js",
     "collect.js",
     "install.sh",
+    "install.linux.sh",
     "install.ps1",
     "cloud.json"
   ],

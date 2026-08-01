@@ -1,7 +1,8 @@
-name: windows-check
+name: collector-check
 
-# Windows에서 collector가 실제로 도는지 검증한다. macOS 개발 환경에서는 확인이 불가능한
-# 경로(PowerShell 실행 정책, 작업 스케줄러 등록, .cmd 셔틀을 통한 npx 실행)를 다룬다.
+# macOS 개발 환경에서는 확인할 수 없는 경로를 검증한다.
+# Windows: PowerShell 실행 정책, 작업 스케줄러 등록과 principal, 한글 인코딩, npx 실행.
+# Linux/WSL: launchctl 대신 systemd 타이머(없으면 cron 안내)로 등록되는지.
 on:
   push:
     branches: [ci/windows-check]
@@ -134,15 +135,16 @@ jobs:
             throw "LogonType 기대값 S4U, 실제 $($t.Principal.LogonType)"
           }
 
-      - name: 등록된 명령줄이 실제로 도는지 (cmd 따옴표 검증)
+      - name: 등록된 명령줄이 실제로 도는지 (인자 검증)
         timeout-minutes: 15
         run: |
           $a = (Get-ScheduledTask -TaskName ChargeConnect).Actions[0]
           $log = Join-Path $env:USERPROFILE ".charge\collector.log"
-          $logOld = $log + '.old'
           if (Test-Path (Join-Path $env:USERPROFILE "charge-connect.log")) {
             throw "예전 위치의 로그가 안 지워짐"
           }
+          # 셸을 거치면 경로의 %VAR% 확장·리다이렉션 실패를 떠안는다. node 를 직접 불러야 한다.
+          if ($a.Execute -match 'cmd\.exe|powershell') { throw "셸을 거쳐 실행하고 있다: $($a.Execute)" }
 
           # install.ps1 이 S4U 동작 확인을 위해 작업을 이미 한 번 띄워놨다. 그게 끝나기를
           # 기다려야 한다 — 겹치면 cmd 의 리다이렉션이 실패해 이 검증이 엉뚱한 이유로 통과한다.
@@ -159,20 +161,52 @@ jobs:
             } catch { Start-Sleep -Seconds 5 }
           }
           if (-not (Test-Path $log)) { throw "install.ps1 의 실행 확인이 로그를 안 남겼다" }
-          Remove-Item -Force $logOld -ErrorAction SilentlyContinue
+          Remove-Item -Force $log
 
-          # 스케줄러가 넣는 것과 동일한 인자로 cmd.exe 를 직접 실행
+          # 스케줄러가 넣는 것과 동일한 인자로 직접 실행
           $p = Start-Process -FilePath $a.Execute -ArgumentList $a.Arguments -NoNewWindow -Wait -PassThru
-          if (-not (Test-Path $logOld)) { throw "직전 로그가 .old 로 안 밀렸다 — 로테이션이 안 걸림" }
-          if (-not (Test-Path $log)) { throw "로그 파일이 안 생김 → cmd 따옴표가 깨졌을 가능성" }
+          if (-not (Test-Path $log)) { throw "로그 파일이 안 생김 → --log 인자가 안 먹었다" }
           $content = Get-Content $log -Raw
           Write-Host "--- collector.log ---"
           Write-Host $content
-          if ([string]::IsNullOrWhiteSpace($content)) { throw "로그가 비었다 — 리다이렉션이 안 걸렸다" }
+          if ($content -notmatch '수집 시작') { throw "시작 줄이 없다 — 실행 확인의 근거가 사라진다" }
           if ($content -notmatch '페어링') { throw "collect.js 출력이 로그에 안 잡혔다" }
-          # 페어링이 없으니 exit 1 이 정상. 그 외 코드는 경로/따옴표 문제를 의심한다.
-          Write-Host "cmd exit=$($p.ExitCode)"
+          # 페어링이 없으니 exit 1 이 정상. 그 외 코드는 경로/인자 문제를 의심한다.
+          Write-Host "exit=$($p.ExitCode)"
           if ($p.ExitCode -ne 1) { throw "기대값 1(미페어링), 실제 $($p.ExitCode)" }
+
+      - name: 로그 로테이션 (5MB 초과)
+        working-directory: collector
+        timeout-minutes: 12
+        env:
+          CHARGE_DISABLE_CODEXBAR: '1'
+          CHARGE_HOME: ${{ runner.temp }}\rot
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:CHARGE_HOME | Out-Null
+          $log = Join-Path $env:CHARGE_HOME "collector.log"
+          $fs = [System.IO.File]::Create($log); $fs.SetLength(6MB); $fs.Close()
+          node collect.js --log $log
+          if (-not (Test-Path ($log + '.old'))) { throw "5MB 초과인데 .old 로 안 밀렸다" }
+          if ((Get-Item $log).Length -gt 1MB) { throw "새 로그가 초기화되지 않았다" }
+          Write-Host (Get-Content $log -Raw)
+          exit 0
+
+      # 러너의 기본 경로는 공백도 비ASCII도 없다. 실사용 경로는 그렇지 않다.
+      - name: install.ps1 — 공백·한글·괄호가 든 경로 + PowerShell 7 직접 실행
+        working-directory: collector
+        timeout-minutes: 15
+        env:
+          CHARGE_HOME: '${{ runner.temp }}\charge 한글 경로 (test)'
+        run: |
+          Unregister-ScheduledTask -TaskName ChargeConnect -Confirm:$false -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force -Path $env:CHARGE_HOME | Out-Null
+          $out = pwsh -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 실패 ($LASTEXITCODE)" }
+          if ($out -match '되돌립니다') { throw "특수 경로에서 S4U 실행 확인이 실패했다" }
+          $log = Join-Path $env:CHARGE_HOME "collector.log"
+          if (-not (Test-Path $log)) { throw "특수 경로에 로그가 안 생김: $log" }
+          Write-Host (Get-Content $log -Raw)
 
       - name: task가 가리키는 경로 기록
         run: |
@@ -195,3 +229,57 @@ jobs:
       - name: 정리
         if: always()
         run: Unregister-ScheduledTask -TaskName ChargeConnect -Confirm:$false -ErrorAction SilentlyContinue
+
+  # Windows 개발자 상당수가 WSL 안에서 작업한다. 거기선 install.sh 의 launchctl 이 없다.
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: collect.test.js
+        working-directory: collector
+        run: node --test collect.test.js
+
+      - name: install.linux.sh — launchctl 을 부르지 않는다
+        working-directory: collector
+        run: |
+          if grep -q launchctl install.linux.sh; then
+            echo "launchctl 호출이 남아 있다"; exit 1
+          fi
+          bash -n install.linux.sh
+          set +e
+          out=$(bash install.linux.sh 2>&1); code=$?
+          set -e
+          echo "$out"
+          echo "exit=$code"
+          # 러너에는 systemd 사용자 세션이 없다 → cron 안내 + 종료 코드 3 이 정상
+          if [ "$code" != "0" ] && [ "$code" != "3" ]; then
+            echo "예상 못한 종료 코드"; exit 1
+          fi
+          if [ "$code" = "3" ] && ! echo "$out" | grep -q crontab; then
+            echo "cron 안내가 없다"; exit 1
+          fi
+
+      - name: cli.js 가 리눅스용 스크립트를 고르고 패키지에도 들어간다
+        working-directory: collector
+        run: |
+          node -e "
+            const fs = require('fs');
+            if (!fs.readFileSync('cli.js', 'utf8').includes('install.linux.sh')) {
+              throw new Error('cli.js 가 install.linux.sh 를 모른다');
+            }
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            if (!pkg.files.includes('install.linux.sh')) throw new Error('npm 패키지에 안 들어간다');
+            console.log('OK');
+          "
+
+      - name: collect.js --dry-run
+        working-directory: collector
+        timeout-minutes: 12
+        env:
+          CHARGE_DISABLE_CODEXBAR: '1'
+        run: node collect.js --dry-run

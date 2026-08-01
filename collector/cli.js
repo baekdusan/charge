@@ -16,6 +16,8 @@ const HOME = process.env.HOME ?? process.env.USERPROFILE;
 const CONF_DIR = process.env.CHARGE_HOME ?? path.join(HOME, ".charge");
 const CONF = path.join(CONF_DIR, "config.json");
 const WIN = process.platform === "win32";
+const LINUX = process.platform === "linux";
+const INSTALLER = WIN ? "install.ps1" : LINUX ? "install.linux.sh" : "install.sh";
 
 // 백엔드 주소 — collector/cloud.json (출시 시 charge 전용 프로젝트로 교체, npm 패키지에 포함)
 const CLOUD = (() => {
@@ -57,12 +59,15 @@ async function pair(code) {
 function installRuntime() {
   const dest = path.join(CONF_DIR, "app");
   fs.mkdirSync(dest, { recursive: true, mode: 0o700 });
-  for (const f of ["cli.js", "collect.js", "install.sh", "install.ps1", "cloud.json", "package.json"]) {
+  const files = ["cli.js", "collect.js", "install.sh", "install.linux.sh", "install.ps1", "cloud.json", "package.json"];
+  for (const f of files) {
     const src = path.join(__dirname, f);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dest, f));
   }
   if (!WIN) {
-    try { fs.chmodSync(path.join(dest, "install.sh"), 0o755); } catch {}
+    for (const f of ["install.sh", "install.linux.sh"]) {
+      try { fs.chmodSync(path.join(dest, f), 0o755); } catch {}
+    }
   }
   return dest;
 }
@@ -71,9 +76,8 @@ function collect(dir = __dirname) {
   execFileSync(process.execPath, [path.join(dir, "collect.js")], { stdio: "inherit" });
 }
 
-function installSchedule() {
-  const dir = installRuntime();
-  const p = path.join(dir, WIN ? "install.ps1" : "install.sh");
+function installSchedule(dir) {
+  const p = path.join(dir, INSTALLER);
   if (WIN) {
     execFileSync("powershell.exe", ["-ExecutionPolicy", "Bypass", "-File", p], { stdio: "inherit" });
   } else {
@@ -96,12 +100,35 @@ function installSchedule() {
     console.log("✓ 페어링 해제 (스케줄 해제는 install.sh/install.ps1 안내 참고)");
     return;
   }
-  // 페어링 코드로 간주: 페어링 → 첫 수집 → 스케줄 등록
+  // 페어링 코드로 간주: 페어링 → 스케줄 등록 → 첫 수집.
+  // 스케줄을 먼저 등록한다 — 첫 수집이 실패해도(네트워크가 잠깐 끊기는 등) 자동 수집은
+  // 살아 있어야 한다. 페어링 코드는 이미 소모돼서 같은 코드로 재시도할 수 없기 때문이다.
   await pair(arg);
-  console.log("첫 수집을 실행합니다…");
-  collect();
+  const dir = installRuntime();
+
   console.log("5분 간격 자동 수집을 등록합니다…");
-  installSchedule();
+  let scheduled = true;
+  try {
+    installSchedule(dir);
+  } catch (e) {
+    scheduled = false;
+    console.error(`자동 수집 등록 실패: ${e.message ?? e}`);
+  }
+
+  console.log("첫 수집을 실행합니다…");
+  try {
+    collect(dir);
+  } catch {
+    console.error("첫 수집에 실패했습니다 (네트워크 문제일 수 있습니다).");
+    if (scheduled) console.error("5분 뒤 자동으로 다시 시도합니다.");
+  }
+
+  if (!scheduled) {
+    const p = path.join(dir, INSTALLER);
+    console.error("페어링은 끝났습니다. 자동 수집 등록만 위 안내를 따라 직접 마무리해주세요.");
+    console.error(`  다시 시도: ${WIN ? `powershell -ExecutionPolicy Bypass -File "${p}"` : `bash "${p}"`}`);
+    process.exit(1);
+  }
   console.log("✓ 설정 끝! 이제 앱에서 데이터가 보입니다.");
 })().catch((e) => {
   console.error(e.message ?? e);

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Charge 수집기 — ccusage로 토큰 사용량을 뽑아 Charge 백엔드에 업로드한다.
-// 사용법: node collect.js [--dry-run] [--days N]
+// 사용법: node collect.js [--dry-run] [--days N] [--log 경로]
 // 인증: `npx charge-connect <페어링코드>`가 저장한 ~/.charge/config.json의 디바이스 토큰
 
 const { execFile } = require("node:child_process");
@@ -16,8 +16,38 @@ const parsedDays = daysArg > -1 ? parseInt(process.argv[daysArg + 1], 10) : NaN;
 const DAYS = Number.isFinite(parsedDays) && parsedDays > 0 ? parsedDays : 60;
 const CACHE_FILE = path.join(__dirname, ".last-payload.json");
 const HOME = process.env.HOME ?? process.env.USERPROFILE;
+
+// 스케줄러가 부를 때는 볼 콘솔이 없으니 출력을 직접 파일로 받는다.
+// 셸 리다이렉션(cmd `>`)에 맡기면 경로의 %VAR% 확장·로그 잠금 같은 문제를 떠안게 된다.
+// 5분마다 도는 작업이라 그냥 이어 붙이면 끝없이 자라므로 5MB에서 .old로 민다.
+const logArg = process.argv.indexOf("--log");
+const LOG_FILE = logArg > -1 ? process.argv[logArg + 1] : null;
+if (LOG_FILE) {
+  try {
+    if (fs.statSync(LOG_FILE).size > 5 * 1024 * 1024) fs.renameSync(LOG_FILE, `${LOG_FILE}.old`);
+  } catch {}
+  // 비동기 스트림은 process.exit에서 버퍼를 잃을 수 있어 동기로 쓴다 (줄 수가 적다)
+  const write = (...args) => {
+    try {
+      fs.appendFileSync(LOG_FILE, `${args.map(String).join(" ")}\n`);
+    } catch {}
+  };
+  console.log = write;
+  console.error = write;
+  // 시작 줄을 바로 남긴다 — '언제 마지막으로 돌았나'를 알 수 있고,
+  // install.ps1이 스케줄 작업이 실제로 떴는지 판정하는 근거이기도 하다.
+  write(`[${new Date().toISOString()}] 수집 시작`);
+}
 const WIN = process.platform === "win32";
-const EXTRA_PATH = WIN ? "" : ":/opt/homebrew/bin:/usr/local/bin";
+// 스케줄러(작업 스케줄러/launchd)가 만드는 환경에는 셸 프로필에서 붙는 PATH가 없다.
+// Windows에서 nvm-windows·fnm·volta로 Node를 깐 사용자는 그래서 npx/ccusage를 못 찾는다.
+// node가 자기 위치는 알고 있으므로, 그 디렉터리와 npm 전역 bin을 직접 얹어준다.
+const EXTRA_PATH = WIN
+  ? [path.dirname(process.execPath), process.env.APPDATA && path.join(process.env.APPDATA, "npm")]
+      .filter(Boolean)
+      .map((p) => `;${p}`)
+      .join("")
+  : ":/opt/homebrew/bin:/usr/local/bin";
 const DEFAULT_CODEXBAR_CLI = "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI";
 
 // 모든 외부 명령은 비동기로 실행한다 — 동기(execFileSync)는 이벤트 루프를 세워
@@ -326,6 +356,7 @@ async function codexLiveWindows(auth) {
 // 마지막으로 Codex를 실제 사용한 시점의 값이라 실시간 조회가 실패했을 때만 쓴다
 function codexSnapshotWindows() {
   const dir = path.join(HOME, ".codex", "sessions");
+  if (!fs.existsSync(dir)) return null; // Codex 미설치
   let latest = null;
   (function walk(d) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
