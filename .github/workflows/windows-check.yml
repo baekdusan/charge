@@ -130,6 +130,7 @@ jobs:
           }
 
       - name: 등록된 명령줄이 실제로 도는지 (cmd 따옴표 검증)
+        timeout-minutes: 15
         run: |
           $a = (Get-ScheduledTask -TaskName ChargeConnect).Actions[0]
           $log = Join-Path $env:USERPROFILE ".charge\collector.log"
@@ -140,13 +141,20 @@ jobs:
           # install.ps1 이 Start-ScheduledTask 로 이미 한 번 돌려놨다. 그게 끝나기를 기다린 뒤
           # 작업을 꺼야 한다 — 겹치면 cmd 의 >> 가 로그를 못 열어 리다이렉션이 통째로 실패하고,
           # 그러면 이 검증이 엉뚱한 이유로 통과해버린다.
-          Stop-ScheduledTask -TaskName ChargeConnect -ErrorAction SilentlyContinue
+          # Disable 하면 State 가 'Disabled' 로 바뀌어 실행 중 여부를 못 읽는다.
+          # 그러니 작업 상태 대신 로그 파일의 잠금이 풀리는지를 직접 본다.
           Disable-ScheduledTask -TaskName ChargeConnect | Out-Null
-          $deadline = (Get-Date).AddMinutes(5)
-          while ((Get-ScheduledTask -TaskName ChargeConnect).State -eq 'Running' -and (Get-Date) -lt $deadline) {
-            Start-Sleep -Seconds 5
+          Stop-ScheduledTask -TaskName ChargeConnect -ErrorAction SilentlyContinue
+          $deadline = (Get-Date).AddMinutes(8)
+          while ((Get-Date) -lt $deadline) {
+            if (-not (Test-Path $log)) { break }
+            try {
+              [System.IO.File]::Open($log, 'Open', 'ReadWrite', 'None').Close()
+              break
+            } catch { Start-Sleep -Seconds 5 }
           }
-          Remove-Item -Force -ErrorAction SilentlyContinue $log
+          Remove-Item -Force $log -ErrorAction SilentlyContinue
+          if (Test-Path $log) { throw "로그가 아직 잠겨 있다 — 스케줄 작업이 안 멈췄다" }
 
           # 스케줄러가 넣는 것과 동일한 인자로 cmd.exe 를 직접 실행
           $p = Start-Process -FilePath $a.Execute -ArgumentList $a.Arguments -NoNewWindow -Wait -PassThru
