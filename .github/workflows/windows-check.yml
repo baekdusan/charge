@@ -1,0 +1,139 @@
+name: windows-check
+
+# Windows에서 collector가 실제로 도는지 검증한다. macOS 개발 환경에서는 확인이 불가능한
+# 경로(PowerShell 실행 정책, 작업 스케줄러 등록, .cmd 셔틀을 통한 npx 실행)를 다룬다.
+on:
+  push:
+    branches: [ci/windows-check]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 환경 확인
+        run: |
+          node -v
+          Write-Host "USERPROFILE=$env:USERPROFILE"
+          Write-Host "HOME=$env:HOME"
+          Write-Host "ExecutionPolicy=$(Get-ExecutionPolicy)"
+
+      # ── 1. 유닛 테스트 ────────────────────────────────────────────────
+      - name: collect.test.js
+        working-directory: collector
+        run: node --test collect.test.js
+
+      # ── 2. CLI 진입점 ────────────────────────────────────────────────
+      - name: cli.js — 인자 없이 실행하면 사용법 + exit 1
+        working-directory: collector
+        run: |
+          $out = node cli.js 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 1) { throw "exit code 기대값 1, 실제 $LASTEXITCODE" }
+          if ($out -notmatch 'charge-connect') { throw "사용법 문구가 안 나옴" }
+
+      - name: cli.js unpair — CHARGE_HOME 아래 config.json 제거
+        working-directory: collector
+        env:
+          CHARGE_HOME: ${{ runner.temp }}\charge-home
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:CHARGE_HOME | Out-Null
+          '{"url":"http://x","anon":"y","token":"z"}' | Set-Content "$env:CHARGE_HOME\config.json"
+          node cli.js unpair
+          if ($LASTEXITCODE -ne 0) { throw "unpair 실패 ($LASTEXITCODE)" }
+          if (Test-Path "$env:CHARGE_HOME\config.json") { throw "config.json이 안 지워짐" }
+
+      # ── 3. 수집 본체 (npx/.cmd 셔틀 경로를 실제로 태운다) ─────────────
+      - name: collect.js --dry-run
+        working-directory: collector
+        timeout-minutes: 12
+        env:
+          CHARGE_DISABLE_CODEXBAR: '1'
+        run: |
+          $out = node collect.js --dry-run 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw "dry-run이 exit $LASTEXITCODE 로 죽음" }
+          if ($out -notmatch 'dry-run') { throw "dry-run 요약 줄이 없음" }
+
+      - name: collect.js — 페어링 없이 업로드하면 안내 후 exit 1
+        working-directory: collector
+        timeout-minutes: 12
+        env:
+          CHARGE_DISABLE_CODEXBAR: '1'
+          CHARGE_HOME: ${{ runner.temp }}\empty-home
+        run: |
+          $out = node collect.js 2>&1 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 1) { throw "exit code 기대값 1, 실제 $LASTEXITCODE" }
+          if ($out -notmatch '페어링') { throw "페어링 안내 문구가 없음" }
+
+      # ── 4. 작업 스케줄러 등록 ────────────────────────────────────────
+      - name: install.ps1 — 스케줄 등록
+        working-directory: collector
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\install.ps1
+          if ($LASTEXITCODE -ne 0) { throw "install.ps1 실패 ($LASTEXITCODE)" }
+
+      - name: 등록된 작업 점검 (콘솔 창 노출 여부 포함)
+        run: |
+          $t = Get-ScheduledTask -TaskName ChargeConnect -ErrorAction Stop
+          $a = $t.Actions[0]
+          Write-Host "Execute   : $($a.Execute)"
+          Write-Host "Arguments : $($a.Arguments)"
+          Write-Host "LogonType : $($t.Principal.LogonType)"
+          Write-Host "RunLevel  : $($t.Principal.RunLevel)"
+          Write-Host "Hidden    : $($t.Settings.Hidden)"
+          Write-Host "Repetition: $($t.Triggers[0].Repetition.Interval) / $($t.Triggers[0].Repetition.Duration)"
+
+          if ($t.Triggers[0].Repetition.Interval -ne 'PT5M') {
+            throw "5분 간격이 아님: $($t.Triggers[0].Repetition.Interval)"
+          }
+          # LogonType Interactive + cmd.exe = 5분마다 콘솔 창이 뜬다는 뜻
+          if ($t.Principal.LogonType -eq 'Interactive' -and $a.Execute -match 'cmd') {
+            Write-Host "::warning::LogonType=Interactive + cmd.exe → 5분마다 콘솔 창이 깜빡인다"
+          }
+
+      - name: 등록된 명령줄이 실제로 도는지 (cmd 따옴표 검증)
+        run: |
+          $a = (Get-ScheduledTask -TaskName ChargeConnect).Actions[0]
+          # 스케줄러가 넣는 것과 동일한 인자로 cmd.exe 를 직접 실행
+          $p = Start-Process -FilePath $a.Execute -ArgumentList $a.Arguments -NoNewWindow -Wait -PassThru
+          $log = Join-Path $env:USERPROFILE "charge-connect.log"
+          if (-not (Test-Path $log)) { throw "로그 파일이 안 생김 → cmd 따옴표가 깨졌을 가능성" }
+          Write-Host "--- charge-connect.log ---"
+          Get-Content $log | Select-Object -Last 40
+          # 페어링이 없으니 exit 1 이 정상. 그 외 코드는 경로/따옴표 문제를 의심한다.
+          Write-Host "cmd exit=$($p.ExitCode)"
+          if ($p.ExitCode -ne 1) { throw "기대값 1(미페어링), 실제 $($p.ExitCode)" }
+
+      - name: ~/.charge/app 런타임 사본 확인
+        run: |
+          # install.ps1 은 스크립트가 놓인 자리에서 collect.js 를 찾는다.
+          # 실사용 경로(cli.js 가 복사하는 ~/.charge/app)와 같은 구조인지 본다.
+          $dir = Split-Path -Parent (Get-ScheduledTask -TaskName ChargeConnect).Actions[0].Arguments
+          Write-Host "task가 가리키는 collect.js: $((Get-ScheduledTask -TaskName ChargeConnect).Actions[0].Arguments)"
+
+      # ── 5. Node 없는 환경에서의 실패 메시지 ──────────────────────────
+      - name: install.ps1 — PATH에 node가 없을 때
+        working-directory: collector
+        continue-on-error: true
+        run: |
+          $out = powershell -ExecutionPolicy Bypass -Command "`$env:PATH='C:\Windows\System32'; & '.\install.ps1'" 2>&1 | Out-String
+          Write-Host $out
+          if ($out -match 'Get-Command') {
+            Write-Host "::warning::node가 없으면 PowerShell 원문 에러가 그대로 노출된다 (안내 문구 필요)"
+          }
+
+      - name: 정리
+        if: always()
+        run: Unregister-ScheduledTask -TaskName ChargeConnect -Confirm:$false -ErrorAction SilentlyContinue
