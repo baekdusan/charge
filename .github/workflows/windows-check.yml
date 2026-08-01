@@ -107,17 +107,24 @@ jobs:
             throw "5분 간격이 아님: $($t.Triggers[0].Repetition.Interval)"
           }
           # LogonType Interactive + cmd.exe = 5분마다 콘솔 창이 뜬다는 뜻
-          if ($t.Principal.LogonType -eq 'Interactive' -and $a.Execute -match 'cmd') {
-            Write-Host "::warning::LogonType=Interactive + cmd.exe → 5분마다 콘솔 창이 깜빡인다"
+          if ($t.Principal.LogonType -eq 'Interactive') {
+            throw "LogonType이 Interactive다 — 5분마다 콘솔 창이 깜빡인다"
+          }
+          if ($t.Principal.LogonType -ne 'S4U') {
+            throw "LogonType 기대값 S4U, 실제 $($t.Principal.LogonType)"
           }
 
       - name: 등록된 명령줄이 실제로 도는지 (cmd 따옴표 검증)
         run: |
           $a = (Get-ScheduledTask -TaskName ChargeConnect).Actions[0]
           # 스케줄러가 넣는 것과 동일한 인자로 cmd.exe 를 직접 실행
+          Stop-ScheduledTask -TaskName ChargeConnect -ErrorAction SilentlyContinue
           $p = Start-Process -FilePath $a.Execute -ArgumentList $a.Arguments -NoNewWindow -Wait -PassThru
-          $log = Join-Path $env:USERPROFILE "charge-connect.log"
+          $log = Join-Path $env:USERPROFILE ".charge\collector.log"
           if (-not (Test-Path $log)) { throw "로그 파일이 안 생김 → cmd 따옴표가 깨졌을 가능성" }
+          if (Test-Path (Join-Path $env:USERPROFILE "charge-connect.log")) {
+            throw "예전 위치의 로그가 안 지워짐"
+          }
           Write-Host "--- charge-connect.log ---"
           Get-Content $log | Select-Object -Last 40
           # 페어링이 없으니 exit 1 이 정상. 그 외 코드는 경로/따옴표 문제를 의심한다.
@@ -133,13 +140,13 @@ jobs:
       # ── 5. Node 없는 환경에서의 실패 메시지 ──────────────────────────
       - name: install.ps1 — PATH에 node가 없을 때
         working-directory: collector
-        continue-on-error: true
         run: |
           $out = powershell -ExecutionPolicy Bypass -Command "`$env:PATH='C:\Windows\System32'; & '.\install.ps1'" 2>&1 | Out-String
           Write-Host $out
-          if ($out -match 'Get-Command') {
-            Write-Host "::warning::node가 없으면 PowerShell 원문 에러가 그대로 노출된다 (안내 문구 필요)"
+          if ($out -match 'Get-Command|CommandNotFoundException') {
+            throw "node가 없으면 PowerShell 원문 에러가 그대로 노출된다"
           }
+          if ($out -notmatch 'nodejs\.org') { throw "Node.js 설치 안내가 없음" }
           exit 0
 
       - name: 정리
