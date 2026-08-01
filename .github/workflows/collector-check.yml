@@ -5,7 +5,14 @@ name: collector-check
 # Linux/WSL: launchctl 대신 systemd 타이머(없으면 cron 안내)로 등록되는지.
 on:
   push:
-    branches: [ci/windows-check]
+    branches: [main]
+    paths:
+      - 'collector/**'
+      - '.github/workflows/collector-check.yml'
+  pull_request:
+    paths:
+      - 'collector/**'
+      - '.github/workflows/collector-check.yml'
   workflow_dispatch:
 
 jobs:
