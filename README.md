@@ -79,7 +79,7 @@ open Charge.xcodeproj
 |------|------|
 | 수동 수집 1회 | `npx charge-connect run` |
 | 수집기 로그 (macOS) | `tail -f ~/Library/Logs/charge-connect.log` |
-| 수집기 로그 (Windows) | `%USERPROFILE%\charge-connect.log` |
+| 수집기 로그 (Windows) | `%USERPROFILE%\.charge\collector.log` (직전 회차는 `.old`) |
 | 수집기 해제 (macOS) | `launchctl unload ~/Library/LaunchAgents/com.charge.connect.plist` |
 | 수집기 해제 (Windows) | `Unregister-ScheduledTask -TaskName ChargeConnect` |
 | 페어링 해제 | `npx charge-connect unpair` |
