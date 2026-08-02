@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Charge — 지원</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+           max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #1c1c1e; }
+    h1 { font-size: 1.6rem; }
+    h2 { font-size: 1.1rem; margin-top: 1.8rem; }
+    .tagline { color: #8e8e93; font-size: 0.95rem; }
+    p, li { color: #3a3a3c; }
+    a { color: #b4830a; }
+    code { background: rgba(120, 120, 128, 0.12); padding: 2px 6px; border-radius: 4px;
+           font-family: ui-monospace, SF Mono, Menlo, monospace; font-size: 0.9em; }
+    .en { border-top: 1px solid rgba(120, 120, 128, 0.25); margin-top: 2.5rem; padding-top: 1.5rem; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #111214; color: #f2f2f7; }
+      p, li { color: #d1d1d6; }
+      a { color: #e0b13e; }
+    }
+  </style>
+</head>
+<body>
+  <h1>⚡ Charge</h1>
+  <p class="tagline">AI 코딩 툴의 사용량과 비용을 iPhone에서 · Your AI coding usage on iPhone</p>
+
+  <p>Charge는 Claude Code, Codex 같은 AI 코딩 툴의 세션·주간 한도와 비용을 iPhone 앱과 위젯으로 보여줍니다. 데스크톱의 가벼운 수집기가 5분마다 사용량 통계만 업로드하며, 코드나 대화 내용은 절대 전송하지 않습니다.</p>
+
+  <h2>시작하기</h2>
+  <ol>
+    <li>iPhone에 Charge를 설치하고 <strong>Apple로 로그인</strong>합니다.</li>
+    <li>앱이 보여주는 명령을 컴퓨터 터미널에 붙여넣습니다: <code>npx charge-connect &lt;페어링코드&gt;</code></li>
+    <li>끝. 5분 간격 자동 수집까지 한 번에 등록됩니다. (Node.js 18+, macOS/Windows)</li>
+  </ol>
+
+  <h2>자주 묻는 질문</h2>
+  <ul>
+    <li><strong>데이터가 안 보여요</strong> — 컴퓨터에서 페어링 명령을 실행했는지, Node.js 18 이상이 설치되어 있는지 확인해 주세요. 수집기는 5분마다 업로드하므로 첫 데이터까지 잠시 걸릴 수 있습니다.</li>
+    <li><strong>컴퓨터 연결을 해제하고 싶어요</strong> — 앱 설정의 연결된 컴퓨터 목록에서 밀어서 해제하면 해당 기기의 데이터가 즉시 삭제됩니다.</li>
+    <li><strong>계정을 삭제하고 싶어요</strong> — 앱 설정에서 계정 삭제 시 모든 데이터가 서버에서 영구 삭제됩니다.</li>
+  </ul>
+
+  <h2>문의</h2>
+  <p>버그 제보, 기능 제안, 기타 문의는 <a href="mailto:dusanisbaek@gmail.com">dusanisbaek@gmail.com</a> 으로 보내주세요.</p>
+
+  <h2>개인정보처리방침</h2>
+  <p><a href="privacy.html">한국어</a> · <a href="privacy-en.html">English</a></p>
+
+  <div class="en">
+    <h2>Support (English)</h2>
+    <p>Charge shows session/weekly limits and costs of AI coding tools like Claude Code and Codex on your iPhone. A lightweight desktop collector uploads usage statistics only — never your code or conversations.</p>
+    <p>To get started: sign in with Apple, then paste the command shown in the app into your terminal: <code>npx charge-connect &lt;pairing-code&gt;</code> (Node.js 18+, macOS/Windows).</p>
+    <p>For questions or bug reports, contact <a href="mailto:dusanisbaek@gmail.com">dusanisbaek@gmail.com</a>. Privacy policy: <a href="privacy-en.html">English</a>.</p>
+  </div>
+</body>
+</html>
