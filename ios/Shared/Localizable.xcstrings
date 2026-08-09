@@ -69,36 +69,6 @@
     "%@%%" : {
 
     },
-    "Checking now…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "지금 확인하는 중…"
-          }
-        }
-      }
-    },
-    "Enjoying Charge? Leave a review" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Charge가 마음에 드세요? 리뷰 남기기"
-          }
-        }
-      }
-    },
-    "Waiting for your computer to connect…" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "컴퓨터가 연결되기를 기다리는 중…"
-          }
-        }
-      }
-    },
     "⚡ On pace to run out in %@" : {
       "localizations" : {
         "ko" : {
@@ -295,6 +265,17 @@
         }
       }
     },
+    "Checking now…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지금 확인하는 중…"
+          }
+        }
+      }
+    },
     "Checking PC connection" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -485,6 +466,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "완료"
+          }
+        }
+      }
+    },
+    "Enjoying Charge? Leave a review" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Charge가 마음에 드세요? 리뷰 남기기"
           }
         }
       }
@@ -1040,6 +1032,16 @@
         }
       }
     },
+    "Session and weekly percentages of your busiest provider." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가장 바쁜 프로바이더의 세션·주간 퍼센트를 표시합니다."
+          }
+        }
+      }
+    },
     "Session and weekly usage at a glance." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1451,6 +1453,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "PC 연결 대기 중"
+          }
+        }
+      }
+    },
+    "Waiting for your computer to connect…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "컴퓨터가 연결되기를 기다리는 중…"
           }
         }
       }
