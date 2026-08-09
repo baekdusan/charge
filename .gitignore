@@ -1,6 +1,9 @@
 # 수집기 상태
 collector/.last-upload-hash
 
+# 로컬 작업 메모 — 테스트 계정 정보 포함, 절대 커밋 금지
+MORNING.md
+
 # 생성물 (xcodegen generate 로 재생성)
 ios/*.xcodeproj
 
