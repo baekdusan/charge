@@ -124,6 +124,9 @@ function dropExpired(w) {
 
 // 캐시에서 복원한 프로바이더도 신선 수집과 같은 만료 규칙을 적용한다.
 // 안 하면 수집이 실패하는 동안 리셋이 지난 창이 무한 재업로드된다 (유령 게이지).
+// {...prev} 전개가 collected_at을 그대로 보존하는 것이 신선도 규칙의 핵심 —
+// 서버는 collected_at이 더 신선한 행만 덮어쓰므로, 토큰이 만료된 기기의 캐시 폴백이
+// 건강한 기기가 방금 올린 값을 덮어쓰지 못한다. collected_at을 여기서 갱신하면 안 된다.
 function sanitizeCachedProvider(prev) {
   if (!prev || typeof prev !== "object") return null;
   const extras = (prev.extras ?? [])
@@ -261,10 +264,18 @@ async function claudeCredentials() {
   }
 }
 
-// Claude: Claude Code OAuth 세션을 재사용해 공식 usage API 조회
-async function claudeProvider() {
+// Claude: Claude Code OAuth 세션을 재사용해 공식 usage API 조회.
+// 반환: { provider, status } — status "ok" | "auth_expired" | "error",
+// 자격증명 자체가 없으면(미설치) status null이라 collect_status에 항목이 안 생긴다.
+// fetchFn/loadCredentials는 테스트 주입용 — 기본값이면 기존 동작 그대로.
+async function claudeProvider({ fetchFn = fetch, loadCredentials = claudeCredentials } = {}) {
+  let cred;
   try {
-    const cred = await claudeCredentials();
+    cred = await loadCredentials();
+  } catch {
+    return { provider: null, status: null }; // 자격증명 없음 = Claude Code 미설치
+  }
+  try {
     const oauth = cred.claudeAiOauth ?? cred;
     const token = oauth.accessToken;
     // rateLimitTier "default_claude_max_20x" → "Max 20x", 없으면 subscriptionType "max" → "Max"
@@ -274,20 +285,21 @@ async function claudeProvider() {
       : oauth.subscriptionType
         ? oauth.subscriptionType[0].toUpperCase() + oauth.subscriptionType.slice(1)
         : null;
-    const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
+    const res = await fetchFn("https://api.anthropic.com/api/oauth/usage", {
       headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
       signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) {
-      // 401 = 토큰 만료 (Claude Code를 한 번 실행하면 갱신됨), 그 외는 일시 장애일 가능성
+      // 401 = 토큰 만료 (Claude Code를 한 번 실행하면 갱신됨), 그 외는 일시 장애일 가능성.
+      // 이 구분이 서버 collect_status로 올라가 앱이 "재로그인 필요"를 안내할 수 있다.
       console.error(`claude usage API ${res.status}${res.status === 401 ? " — 토큰 만료, Claude Code를 실행하면 갱신됩니다" : ""}`);
-      return null;
+      return { provider: null, status: res.status === 401 ? "auth_expired" : "error" };
     }
     const d = await res.json();
     // 계정 UUID → 해시 (프로필 조회 실패 시 null — 캐시 폴백이 채워준다)
     let account = null;
     try {
-      const pr = await fetch("https://api.anthropic.com/api/oauth/profile", {
+      const pr = await fetchFn("https://api.anthropic.com/api/oauth/profile", {
         headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
         signal: AbortSignal.timeout(10_000),
       });
@@ -308,17 +320,21 @@ async function claudeProvider() {
         },
       }));
     return {
-      id: "claude",
-      name: "Claude",
-      plan,
-      account,
-      session: dropExpired(win(d.five_hour, 300)),
-      weekly: dropExpired(win(d.seven_day, 10080)),
-      extras: extras.length ? extras : null,
+      provider: {
+        id: "claude",
+        name: "Claude",
+        plan,
+        account,
+        session: dropExpired(win(d.five_hour, 300)),
+        weekly: dropExpired(win(d.seven_day, 10080)),
+        extras: extras.length ? extras : null,
+        collected_at: new Date().toISOString(), // usage API 성공 시각
+      },
+      status: "ok",
     };
   } catch (e) {
     console.error(`claude 프로바이더 수집 실패: ${e.message ?? e}`);
-    return null;
+    return { provider: null, status: "error" };
   }
 }
 
@@ -427,26 +443,38 @@ function codexSnapshotWindows() {
           window_minutes: w.window_minutes ?? null,
         }
       : null;
-  return { session: win(rl.primary), weekly: win(rl.secondary) };
+  // collected_at = 로그 파일 mtime — 스냅샷은 "지금"이 아니라 마지막 사용 시점의 값이므로
+  // 수집 시각을 넣으면 다른 기기의 진짜 최신 데이터를 신선도 규칙에서 이겨버린다.
+  return { session: win(rl.primary), weekly: win(rl.secondary), collected_at: new Date(latest.m).toISOString() };
 }
 
+// 반환: { provider, status } — live 성공 "ok", 스냅샷 폴백 "stale",
+// ~/.codex는 있는데 둘 다 실패면 "error", 미설치면 status null(항목 없음).
 async function codexProvider() {
+  if (!fs.existsSync(path.join(HOME, ".codex"))) return { provider: null, status: null }; // Codex 미설치
   try {
     const auth = codexAuth();
-    const windows = (await codexLiveWindows(auth)) ?? codexSnapshotWindows();
-    if (!windows) return null;
+    const live = await codexLiveWindows(auth);
+    const snapshot = live ? null : codexSnapshotWindows();
+    const windows = live ?? snapshot;
+    if (!windows) return { provider: null, status: "error" };
     return {
-      id: "codex",
-      name: "Codex",
-      plan: windows.plan ?? auth?.plan ?? null,
-      account: auth?.account ?? null,
-      session: dropExpired(windows.session),
-      weekly: dropExpired(windows.weekly),
-      extras: null,
+      provider: {
+        id: "codex",
+        name: "Codex",
+        plan: windows.plan ?? auth?.plan ?? null,
+        account: auth?.account ?? null,
+        session: dropExpired(windows.session),
+        weekly: dropExpired(windows.weekly),
+        extras: null,
+        // live면 지금이 관측 시각, 스냅샷 폴백이면 .jsonl mtime이 실제 관측 시각
+        collected_at: live ? new Date().toISOString() : snapshot.collected_at,
+      },
+      status: live ? "ok" : "stale",
     };
   } catch (e) {
     console.error(`codex 프로바이더 수집 실패: ${e.message ?? e}`);
-    return null;
+    return { provider: null, status: "error" };
   }
 }
 
@@ -533,6 +561,7 @@ function codexBarEntryToProvider(entry) {
     extras: extras.length ? extras : null,
     status: null,
     collector_source: "codexbar",
+    collected_at: new Date().toISOString(), // CodexBar CLI 성공 시각
   };
 }
 
@@ -555,11 +584,11 @@ function parseCodexBarJSON(raw) {
 }
 
 async function collectCodexBarProviders() {
-  if (process.env.CHARGE_DISABLE_CODEXBAR === "1") return { providers: [], complete: false };
+  if (process.env.CHARGE_DISABLE_CODEXBAR === "1") return { providers: [], complete: false, statuses: {} };
   // 따옴표로 감싼 경로(Windows에서 흔한 습관)는 벗겨서 execFile에 그대로 넘긴다
   const cli = process.env.CHARGE_CODEXBAR_CLI?.replace(/^"(.*)"$/s, "$1")
     ?? (!WIN && fs.existsSync(DEFAULT_CODEXBAR_CLI) ? DEFAULT_CODEXBAR_CLI : null);
-  if (!cli) return { providers: [], complete: false };
+  if (!cli) return { providers: [], complete: false, statuses: {} };
 
   let raw = "";
   let commandSucceeded = true;
@@ -572,22 +601,33 @@ async function collectCodexBarProviders() {
     raw = e.stdout?.toString?.() ?? "";
     if (!raw.trim()) {
       console.error(`CodexBar 프로바이더 수집 실패: ${e.message ?? e}`);
-      return { providers: [], complete: false };
+      return { providers: [], complete: false, statuses: {} };
     }
   }
 
   const entries = parseCodexBarJSON(raw);
   if (!entries) {
     console.error("CodexBar 프로바이더 수집 실패: JSON 출력을 해석할 수 없습니다.");
-    return { providers: [], complete: false };
+    return { providers: [], complete: false, statuses: {} };
   }
   const bridgeEntries = entries.filter((entry) => !["claude", "codex"].includes(entry?.provider));
-  const providers = bridgeEntries.map(codexBarEntryToProvider).filter(Boolean);
-  const complete = commandSucceeded && !bridgeEntries.some((entry) => entry?.error);
-  for (const entry of bridgeEntries.filter((item) => item?.error)) {
-    console.error(`CodexBar ${entry.provider ?? "프로바이더"} 수집 실패: ${entry.error.message ?? "알 수 없는 오류"}`);
+  const providers = [];
+  const statuses = {};
+  for (const entry of bridgeEntries) {
+    if (entry?.error) {
+      console.error(`CodexBar ${entry.provider ?? "프로바이더"} 수집 실패: ${entry.error.message ?? "알 수 없는 오류"}`);
+      // claude/codex 상태는 자체 수집기가 판정한다 — entry.id로 새어 들어와도 덮지 않는다
+      const id = textValue(entry.provider, entry.id)?.toLowerCase();
+      if (id && id !== "claude" && id !== "codex") statuses[id] = "error";
+      continue;
+    }
+    const provider = codexBarEntryToProvider(entry);
+    if (!provider) continue; // 창이 하나도 없는 엔트리 — 성공도 실패도 아니라 상태 미기록
+    providers.push(provider);
+    statuses[provider.id] = "ok";
   }
-  return { providers, complete };
+  const complete = commandSucceeded && !bridgeEntries.some((entry) => entry?.error);
+  return { providers, complete, statuses };
 }
 
 // 프로바이더 상태 페이지 (Statuspage 공용 API)
@@ -610,11 +650,16 @@ async function collectProviders() {
     statusOf("https://status.openai.com/api/v2/status.json"),
     collectCodexBarProviders(),
   ]);
-  if (claude) claude.status = claudeStatus;
-  if (codex) codex.status = codexStatus;
+  if (claude.provider) claude.provider.status = claudeStatus;
+  if (codex.provider) codex.provider.status = codexStatus;
+  // collect_status: 미설치(status null)는 항목을 만들지 않는다 — 설치된 소스만 정직하게 보고
+  const statuses = { ...codexBar.statuses };
+  if (claude.status) statuses.claude = claude.status;
+  if (codex.status) statuses.codex = codex.status;
   return {
-    providers: [claude, codex, ...codexBar.providers].filter(Boolean),
+    providers: [claude.provider, codex.provider, ...codexBar.providers].filter(Boolean),
     codexBarComplete: codexBar.complete,
+    statuses,
   };
 }
 
@@ -632,18 +677,33 @@ function resolveMode() {
 }
 
 // 디바이스 토큰으로 charge_upload RPC 호출 (서버가 본인 행에만 기록)
-async function pairedUpload(mode, daily, live, providers) {
-  const res = await fetch(`${mode.url}/rest/v1/rpc/charge_upload`, {
-    method: "POST",
-    headers: {
-      apikey: mode.anon,
-      Authorization: `Bearer ${mode.anon}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ p_token: mode.token, p_daily: daily, p_live: live, p_providers: providers }),
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!res.ok) throw new Error(`업로드 실패 (${res.status}): ${await res.text()}`);
+async function pairedUpload(mode, daily, live, providers, collectStatus = null) {
+  const post = (body) =>
+    fetch(`${mode.url}/rest/v1/rpc/charge_upload`, {
+      method: "POST",
+      headers: {
+        apikey: mode.anon,
+        Authorization: `Bearer ${mode.anon}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30_000),
+    });
+  const body = { p_token: mode.token, p_daily: daily, p_live: live, p_providers: providers, p_collect_status: collectStatus };
+  let res = await post(body);
+  if (res.ok) return;
+  const text = await res.text();
+  // 서버에 5번째 파라미터(p_collect_status)가 아직 배포 전이면 PostgREST가 함수
+  // 시그니처를 못 찾아 404/PGRST202를 낸다 — 수집기가 먼저 업데이트된 배포 순서
+  // 역전 대비로, 구버전 시그니처(파라미터 제외)로 1회만 재시도한다.
+  if (res.status === 404 || text.includes("PGRST202")) {
+    console.error("charge_upload 구버전 서버 감지(404/PGRST202) — p_collect_status 없이 재시도합니다");
+    const { p_collect_status: _omitted, ...legacyBody } = body;
+    res = await post(legacyBody);
+    if (res.ok) return;
+    throw new Error(`업로드 실패 (${res.status}): ${await res.text()}`);
+  }
+  throw new Error(`업로드 실패 (${res.status}): ${text}`);
 }
 
 async function main() {
@@ -679,16 +739,25 @@ async function main() {
     providerCollection = providersR.value;
   } else {
     console.error(`프로바이더 수집 실패, 이전 값 유지: ${providersR.reason?.message ?? providersR.reason}`);
-    providerCollection = { providers: [], codexBarComplete: false };
+    // 수집이 통째로 죽으면 상태를 알 수 없다 — null로 보내 정직한 미상 처리 (서버도 null로 덮음)
+    providerCollection = { providers: [], codexBarComplete: false, statuses: null };
   }
   providers = providerCollection.providers;
-  // 일부 프로바이더만 실패해도 목록에서 사라지지 않게 이전 값으로 채운다 (앱 설정 토글 유지)
+  // 일부 프로바이더만 실패해도 목록에서 사라지지 않게 이전 값으로 채운다 (앱 설정 토글 유지).
+  // 이렇게 캐시로 채운 프로바이더의 상태는 statuses에 이미 실패(auth_expired/error 등)로
+  // 기록돼 있다 — 캐시 복원이 성공처럼 보이면 안 되므로 여기서 덮지 않는다.
   for (const prev of cache.providers ?? []) {
     if (providers.some((p) => p.id === prev.id)) continue;
     // CodexBar가 정상 완료된 경우, 거기서 더 이상 반환하지 않는 항목은 사용자가 끈 것으로 본다.
     if (providerCollection.codexBarComplete && prev.collector_source === "codexbar") continue;
     const sanitized = sanitizeCachedProvider(prev);
-    if (sanitized) providers.push(sanitized);
+    if (sanitized) {
+      // 0.1.4 이전 캐시엔 collected_at이 없다. 그대로 보내면 서버가 now()로 취급해
+      // 나이 미상의 캐시가 건강한 기기의 진짜 최신 데이터를 이겨버린다 — epoch로 스탬프해
+      // "언제 것인지 모르는 데이터는 항상 진다"로 만든다 (행 유지에는 지장 없음).
+      if (!sanitized.collected_at) sanitized.collected_at = new Date(0).toISOString();
+      providers.push(sanitized);
+    }
   }
   // 계정 식별 실패 시 마지막으로 알려진 계정 해시 유지 (계정 미상('')과 실제 계정 행이 갈라지는 것 방지)
   for (const p of providers) {
@@ -696,7 +765,7 @@ async function main() {
   }
 
   if (DRY_RUN) {
-    console.log(JSON.stringify({ daily: daily.slice(-1), live, providers }, null, 2));
+    console.log(JSON.stringify({ daily: daily.slice(-1), live, providers, collect_status: providerCollection.statuses }, null, 2));
     console.log(`\n[dry-run] daily ${daily.length}행 + live + providers ${providers.length}개 업로드 예정`);
     return;
   }
@@ -708,7 +777,7 @@ async function main() {
   }
 
   const now = new Date().toISOString();
-  await pairedUpload(mode, daily, live, providers);
+  await pairedUpload(mode, daily, live, providers, providerCollection.statuses);
 
   fs.writeFileSync(CACHE_FILE, JSON.stringify({ daily, live, providers }));
   console.log(`[${now}] daily ${daily.length}행 + live + providers ${providers.length}개 업로드 완료`);
@@ -724,6 +793,7 @@ if (require.main === module) {
 module.exports = {
   CCUSAGE_PKG,
   accountHash,
+  claudeProvider,
   codexBarEntryToProvider,
   collectCodexBarProviders,
   dropExpired,

@@ -175,6 +175,74 @@ test("T09 sanitizeCachedProvider: 캐시 복원 시 만료 창 제거, 유효 �
   assert.equal(C.sanitizeCachedProvider(null), null);
 });
 
+test("T09b sanitizeCachedProvider: collected_at 보존 (신선도 규칙의 핵심)", () => {
+  const collectedAt = "2026-08-01T00:00:00.000Z";
+  const p = C.sanitizeCachedProvider({
+    id: "claude",
+    collected_at: collectedAt,
+    session: { percent: 7, resets_at: futureReset },
+    weekly: null,
+    extras: null,
+  });
+  // 캐시 폴백은 관측 시각을 갱신하면 안 된다 — 갱신하면 만료 토큰 기기가
+  // 건강한 기기의 최신 업로드를 서버 신선도 규칙에서 이겨버린다
+  assert.equal(p.collected_at, collectedAt);
+  assert.equal(p.session.percent, 7);
+});
+
+test("T09c codexBarEntryToProvider: 성공 엔트리에 collected_at(now) 기록", () => {
+  const before = Date.now();
+  const p = C.codexBarEntryToProvider({
+    provider: "gemini",
+    usage: { primary: { usedPercent: 5, resetsAt: futureReset, windowMinutes: 300 } },
+  });
+  const t = new Date(p.collected_at).getTime();
+  assert.ok(Number.isFinite(t));
+  assert.ok(t >= before && t <= Date.now());
+});
+
+test("T09d claudeProvider: 401→auth_expired, 5xx→error, 성공→ok+collected_at, 자격증명 없음→상태 없음", async () => {
+  const creds = async () => ({ claudeAiOauth: { accessToken: "tok", rateLimitTier: "default_claude_max_20x" } });
+  const failWith = (code) => async () => ({ ok: false, status: code });
+
+  const r401 = await C.claudeProvider({ fetchFn: failWith(401), loadCredentials: creds });
+  assert.equal(r401.provider, null);
+  assert.equal(r401.status, "auth_expired");
+
+  const r500 = await C.claudeProvider({ fetchFn: failWith(500), loadCredentials: creds });
+  assert.equal(r500.provider, null);
+  assert.equal(r500.status, "error");
+
+  const okFetch = async (url) =>
+    String(url).includes("/usage")
+      ? {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            five_hour: { utilization: 7, resets_at: futureReset },
+            seven_day: { utilization: 30, resets_at: futureReset },
+            limits: [],
+          }),
+        }
+      : { ok: true, status: 200, json: async () => ({ account: { uuid: "user-uuid" } }) };
+  const before = Date.now();
+  const rOk = await C.claudeProvider({ fetchFn: okFetch, loadCredentials: creds });
+  assert.equal(rOk.status, "ok");
+  assert.equal(rOk.provider.session.percent, 7);
+  assert.equal(rOk.provider.plan, "Max 20x");
+  assert.equal(rOk.provider.account, C.accountHash("user-uuid"));
+  const t = new Date(rOk.provider.collected_at).getTime();
+  assert.ok(t >= before && t <= Date.now());
+
+  // 자격증명 자체가 없으면 미설치 — collect_status에 항목을 만들지 않는다
+  const missing = await C.claudeProvider({
+    fetchFn: failWith(200),
+    loadCredentials: async () => { throw new Error("no credentials"); },
+  });
+  assert.equal(missing.provider, null);
+  assert.equal(missing.status, null);
+});
+
 test("T10 collectCodexBarProviders: CLI가 도는 동안 이벤트 루프가 살아있다 (Claude fetch 기아 회귀 방지)",
   { skip: process.platform === "win32" }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "charge-test-"));
@@ -197,6 +265,7 @@ test("T10 collectCodexBarProviders: CLI가 도는 동안 이벤트 루프가 살
     assert.equal(result.complete, true);
     assert.equal(result.providers.length, 1);
     assert.equal(result.providers[0].id, "gemini");
+    assert.deepEqual(result.statuses, { gemini: "ok" });
   } finally {
     for (const k of ["CHARGE_CODEXBAR_CLI", "CHARGE_DISABLE_CODEXBAR"]) {
       if (saved[k] === undefined) delete process.env[k];
