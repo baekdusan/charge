@@ -14,6 +14,12 @@ struct OnboardingView: View {
     /// 가이드를 연 시점의 디바이스 목록 — "새" 기기가 추가돼야만 연결 성공으로 판정한다
     /// (이미 데이터가 있는 계정이 두 번째 컴퓨터를 페어링할 때 기존 데이터로 즉시 닫히는 것 방지)
     @State private var baselineDeviceIDs: Set<String>?
+    /// 가이드를 연 시점에 last_seen이 살아 있던(업로드 이력이 있는) 기기들.
+    /// 이미 연결된 기기를 다시 페어링하면 서버는 새 기기를 만들지 않고 기존 레코드의
+    /// last_seen을 null로 리셋한다 — 이게 재페어링의 유일한 지문이다(정상 업로드는 절대 null로
+    /// 되돌리지 않는다). 그래서 "새 기기 등장"에 더해 "기존 활성 기기의 last_seen이 null로
+    /// 리셋됨"도 연결로 인정해, 같은 컴퓨터를 다시 연동해도 화면이 자동으로 닫히게 한다.
+    @State private var baselineActiveIDs: Set<String>?
     /// 설정의 "다른 컴퓨터 페어링"은 true(새 기기 필수), 첫 실행 온보딩은 false —
     /// 재로그인한 기존 계정은 이미 연결된 기기만으로 바로 통과해야 한다
     var requiresNewDevice = true
@@ -236,7 +242,9 @@ struct OnboardingView: View {
     private func captureBaseline() async {
         guard baselineDeviceIDs == nil else { return }
         if let payload = try? await ChargeAPI.fetchAll() {
-            baselineDeviceIDs = Set((payload.devices ?? []).map(\.id))
+            let devices = payload.devices ?? []
+            baselineDeviceIDs = Set(devices.map(\.id))
+            baselineActiveIDs = Set(devices.filter { $0.lastSeenDate != nil }.map(\.id))
         }
     }
 
@@ -262,8 +270,13 @@ struct OnboardingView: View {
             let devices = try await ChargeAPI.fetchAll().devices ?? []
             lastCheckFailed = false
             let baseline = baselineDeviceIDs ?? []
+            let activeBaseline = baselineActiveIDs ?? []
+            // 새 기기가 붙었거나(다른 컴퓨터 추가), 기존 활성 기기의 last_seen이 null로
+            // 리셋됐으면(같은 컴퓨터 재페어링) 연결로 본다. 후자는 서버가 재페어링 때만
+            // 만드는 상태라 정상 업로드로는 오탐하지 않는다.
             let connected = requiresNewDevice
                 ? devices.contains { !baseline.contains($0.id) }
+                    || devices.contains { activeBaseline.contains($0.id) && $0.lastSeenDate == nil }
                 : !devices.isEmpty
             if connected {
                 message = nil
