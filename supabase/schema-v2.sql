@@ -159,6 +159,8 @@ declare
   v_parts text[];
   tok text;
 begin
+  -- 기기 이름은 앱 목록에 그대로 표시되므로 길이를 제한한다 (실명·과도한 문자열 방어)
+  p_label := left(trim(p_label), 64);
   -- 무차별 대입 방지: 호출자(IP)별로 최근 10분 실패 20회 초과 시 차단
   -- x-forwarded-for의 마지막 항목 = 게이트웨이가 덧붙인 실제 클라이언트 IP (앞쪽은 위조 가능)
   v_source := coalesce(current_setting('request.headers', true)::jsonb ->> 'x-forwarded-for', 'unknown');
@@ -222,21 +224,54 @@ begin
   if v_user is null then
     raise exception 'invalid device token';
   end if;
+
+  -- 방어적 검증: anon 키가 공개돼 있어 가입자 누구나 유효 토큰을 얻을 수 있으므로,
+  -- 행 폭증·거대 blob으로 저장소/비용을 부풀리는 것을 막는다. 정상 수집기 페이로드는
+  -- daily 수십 행·providers 수 개·작은 blob이라 아래 상한에 한참 못 미친다.
+  if jsonb_typeof(coalesce(p_daily, '[]'::jsonb)) <> 'array'
+     or jsonb_typeof(coalesce(p_providers, '[]'::jsonb)) <> 'array' then
+    raise exception 'invalid payload';
+  end if;
+  -- daily 상한은 period 필터 창(current_date-400~+2 = 403일)보다 넉넉히 커야
+  -- --days 400 같은 정상 수집이 거부되지 않는다. 저장 행 수는 어차피 period 창이 묶는다.
+  if jsonb_array_length(coalesce(p_daily, '[]'::jsonb)) > 500
+     or jsonb_array_length(coalesce(p_providers, '[]'::jsonb)) > 100 then
+    raise exception 'payload has too many rows';
+  end if;
+  if octet_length(coalesce(p_daily, '[]'::jsonb)::text) > 512 * 1024
+     or octet_length(coalesce(p_providers, '[]'::jsonb)::text) > 256 * 1024
+     or octet_length(coalesce(p_live, 'null'::jsonb)::text) > 64 * 1024 then
+    raise exception 'payload too large';
+  end if;
+
   update charge_devices set last_seen_at = now() where token_hash = v_hash;
 
+  -- period를 합리적 범위로 제한(무한 과거/미래 행 방지)하고, 숫자는 음수·NaN·Infinity를
+  -- 걷어내고, models blob은 행당 64KB로 제한한다. period 범위 + 기존 은퇴 로직이
+  -- 디바이스당 charge_daily/charge_providers 행 수를 상수로 묶는다.
   insert into charge_daily (user_id, device_id, period, total_cost, total_tokens, input_tokens,
                             output_tokens, cache_read_tokens, cache_creation_tokens, models, updated_at)
-  select v_user, v_device,
-         (d->>'period')::date,
-         coalesce((d->>'total_cost')::double precision, 0),
-         coalesce((d->>'total_tokens')::bigint, 0),
-         coalesce((d->>'input_tokens')::bigint, 0),
-         coalesce((d->>'output_tokens')::bigint, 0),
-         coalesce((d->>'cache_read_tokens')::bigint, 0),
-         coalesce((d->>'cache_creation_tokens')::bigint, 0),
-         coalesce(d->'models', '[]'::jsonb),
+  select v_user, v_device, s.period,
+         -- Postgres는 NaN을 자기 자신과 '같고' 모든 값보다 '크게' 취급한다(IEEE754와 반대).
+         -- 그래서 NaN 판별은 s.cost <> s.cost 가 아니라 s.cost = 'NaN' 이어야 한다.
+         case when s.cost = 'NaN'::double precision or s.cost = 'Infinity'::double precision then 0
+              else least(greatest(s.cost, 0), 1e12) end,
+         greatest(s.toks, 0), greatest(s.inp, 0), greatest(s.outp, 0),
+         greatest(s.cread, 0), greatest(s.ccreate, 0),
+         case when octet_length(s.models::text) > 64 * 1024 then '[]'::jsonb else s.models end,
          now()
-  from jsonb_array_elements(p_daily) d
+  from (
+    select (d->>'period')::date as period,
+           coalesce((d->>'total_cost')::double precision, 0) as cost,
+           coalesce((d->>'total_tokens')::bigint, 0) as toks,
+           coalesce((d->>'input_tokens')::bigint, 0) as inp,
+           coalesce((d->>'output_tokens')::bigint, 0) as outp,
+           coalesce((d->>'cache_read_tokens')::bigint, 0) as cread,
+           coalesce((d->>'cache_creation_tokens')::bigint, 0) as ccreate,
+           coalesce(d->'models', '[]'::jsonb) as models
+    from jsonb_array_elements(p_daily) d
+    where (d->>'period')::date between current_date - 400 and current_date + 2
+  ) s
   on conflict (user_id, device_id, period) do update set
     total_cost = excluded.total_cost,
     total_tokens = excluded.total_tokens,
@@ -298,6 +333,20 @@ grant execute on function public.charge_claim_pairing_code(text, text) to anon, 
 
 revoke execute on function public.charge_upload(text, jsonb, jsonb, jsonb) from public;
 grant execute on function public.charge_upload(text, jsonb, jsonb, jsonb) to anon, authenticated;
+
+-- 수집기(anon)가 호출: unpair 시 서버의 디바이스 토큰을 폐기한다.
+-- 로컬 config만 지우면 그 토큰은 서버에서 계속 유효해, 유출 시 남이 업로드에 쓸 수 있다.
+-- 토큰을 아는 주체만 자기 디바이스를 지운다(업로드와 같은 신뢰 모델). cascade로 데이터도 정리.
+create or replace function public.charge_revoke_device(p_token text)
+returns void
+language plpgsql security definer set search_path = public, extensions
+as $$
+begin
+  delete from charge_devices where token_hash = encode(digest(p_token, 'sha256'), 'hex');
+end $$;
+
+revoke execute on function public.charge_revoke_device(text) from public;
+grant execute on function public.charge_revoke_device(text) to anon, authenticated;
 
 -- MARK: 계정 삭제 (App Store 심사 요건)
 -- 본인 auth.users 행을 지우면 charge_* 데이터가 전부 on delete cascade로 정리된다.
