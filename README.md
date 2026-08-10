@@ -8,13 +8,13 @@
 
 Session & weekly rate limits, burn‑rate prediction, and a cost dashboard for **Claude Code, Codex, and 20+ other providers** — with home‑ and lock‑screen widgets.
 
+[![App Store](https://img.shields.io/badge/App_Store-Download-0D96F6?logo=apple&logoColor=white)](https://apps.apple.com/app/id6796766465)
 [![npm](https://img.shields.io/npm/v/charge-connect?color=cb3837&logo=npm&label=charge-connect)](https://www.npmjs.com/package/charge-connect)
-[![iOS](https://img.shields.io/badge/iOS-17%2B-black?logo=apple)](#-install-2-minutes)
 [![Collector](https://img.shields.io/badge/collector-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-4c9?logo=nodedotjs&logoColor=white)](#-install-2-minutes)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](#-contributing)
 
-[**📲 App Store**](# "Replace with your App Store link") · [Install](#-install-2-minutes) · [How it works](#-how-it-works) · [Privacy](#-privacy--security) · [Roadmap](#-roadmap)
+[**📲 Download on the App Store**](https://apps.apple.com/app/id6796766465) · [Install](#-install-2-minutes) · [How it works](#-how-it-works) · [Privacy](#-privacy--security) · [Roadmap](#-roadmap)
 
 </div>
 
@@ -25,6 +25,31 @@ You're deep in a Claude Code session and the questions creep in: *How much of my
 **Charge** collects usage from your desktop with a tiny background agent and shows it on your **iPhone and widgets** — wherever you are.
 
 > The name is a double meaning: your session limit **drains like a battery**, and your bill **charges up like a tab**. ⚡
+
+<div align="center">
+<table>
+<tr>
+<td><img src="docs/screenshots/01-overview.png" width="250" alt="All your AI usage at a glance" /></td>
+<td><img src="docs/screenshots/02-gauges.png" width="250" alt="Session and weekly gauges with burn-rate forecasts" /></td>
+<td><img src="docs/screenshots/03-streak.png" width="250" alt="Streak heatmap and 14-day cost trend" /></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Everything at a glance</b></sub></td>
+<td align="center"><sub><b>Limits + burn‑rate</b></sub></td>
+<td align="center"><sub><b>Streak &amp; spend</b></sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/04-lockscreen.png" width="250" alt="Lock Screen widgets" /></td>
+<td><img src="docs/screenshots/05-settings.png" width="250" alt="Providers, alerts and gauge thresholds" /></td>
+<td><img src="docs/screenshots/06-setup.png" width="250" alt="Set up in under a minute" /></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Lock‑screen widgets</b></sub></td>
+<td align="center"><sub><b>Tuned to your tools</b></sub></td>
+<td align="center"><sub><b>60‑second setup</b></sub></td>
+</tr>
+</table>
+</div>
 
 ## ✨ Features
 
