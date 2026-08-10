@@ -22,12 +22,14 @@ const HOME = process.env.HOME ?? process.env.USERPROFILE;
 // 5분마다 도는 작업이라 그냥 이어 붙이면 끝없이 자라므로 5MB에서 .old로 민다.
 const logArg = process.argv.indexOf("--log");
 const LOG_FILE = logArg > -1 ? process.argv[logArg + 1] : null;
-if (logArg > -1 && (!LOG_FILE || LOG_FILE.startsWith("-"))) {
+// 아래 로그 리다이렉션·핸들러 등록·process.exit은 스크립트로 직접 실행될 때만 해야 한다.
+// cli.js가 버전 상수를 require할 때 이 부작용이 딸려오면 CLI 콘솔이 파일로 새거나 조기 종료된다.
+if (require.main === module && logArg > -1 && (!LOG_FILE || LOG_FILE.startsWith("-"))) {
   // 값을 안 주면 조용히 로그가 꺼지고, 다음 옵션을 삼키면 "--dry-run"이라는 파일에 쓰게 된다
   console.error("--log 뒤에는 파일 경로가 필요합니다.");
   process.exit(1);
 }
-if (LOG_FILE) {
+if (require.main === module && LOG_FILE) {
   try {
     if (fs.statSync(LOG_FILE).size > 5 * 1024 * 1024) fs.renameSync(LOG_FILE, `${LOG_FILE}.old`);
   } catch {}
@@ -63,6 +65,13 @@ const EXTRA_PATH = WIN
   : ":/opt/homebrew/bin:/usr/local/bin";
 const DEFAULT_CODEXBAR_CLI = "/Applications/CodexBar.app/Contents/Helpers/CodexBarCLI";
 
+// ccusage는 정확한 버전으로 고정한다 — @latest로 5분마다 무인 실행하면 ccusage npm
+// 계정/배포가 탈취됐을 때 별도 조작 없이 악성 코드가 모든 사용자 PC에서 돌게 된다.
+// 이 프로세스는 Claude/Codex 자격증명이 있는 홈에서 사용자 권한으로 실행되므로 위험이 크다.
+// 갱신은 릴리스마다 새 버전을 검토한 뒤 의도적으로만 올린다.
+const CCUSAGE_VERSION = "20.0.19";
+const CCUSAGE_PKG = `ccusage@${CCUSAGE_VERSION}`;
+
 // 모든 외부 명령은 비동기로 실행한다 — 동기(execFileSync)는 이벤트 루프를 세워
 // 진행 중인 fetch(AbortSignal 타이머 포함)를 전부 타임아웃시킨다.
 const execOpts = (timeout) => ({
@@ -93,9 +102,10 @@ async function runCcusage(args) {
   try {
     return JSON.parse(await runAsync("ccusage", args));
   } catch (e) {
-    console.error(`ccusage 직접 실행 실패(${e.code ?? e.message}), npx로 재시도 — 'npm i -g ccusage'를 해두면 빨라집니다`);
+    console.error(`ccusage 직접 실행 실패(${e.code ?? e.message}), npx로 재시도 — 'npm i -g ${CCUSAGE_PKG}'를 해두면 빨라집니다`);
     // --prefer-offline: npx 캐시가 있으면 레지스트리 조회 없이 재사용 (5분마다 재다운로드 방지)
-    return JSON.parse(await runAsync("npx", ["-y", "--prefer-offline", "ccusage@latest", ...args], 300_000));
+    // 버전은 CCUSAGE_PKG로 고정 — @latest 자동 추적은 공급망 탈취를 무인 실행 채널로 만든다.
+    return JSON.parse(await runAsync("npx", ["-y", "--prefer-offline", CCUSAGE_PKG, ...args], 300_000));
   }
 }
 
@@ -491,15 +501,18 @@ function codexBarEntryToProvider(entry) {
   });
 
   if (!primary && !secondary && extras.length === 0) return null;
+  // 불투명 식별자(계정 ID·조직)를 이메일보다 먼저 쓴다 — account는 salt 없는 sha256의
+  // 앞 12자(48비트)라, 이메일을 넣으면 DB 유출 시 사전 대입으로 원문이 역산된다.
+  // 고엔트로피 ID는 그 대입이 통하지 않는다. 이메일은 다른 식별자가 전혀 없을 때만 폴백.
   const rawAccount = textValue(
-    identity.accountEmail,
-    identity.email,
-    usage.accountEmail,
-    entry.accountEmail,
     identity.accountId,
     usage.accountId,
     identity.accountOrganization,
-    usage.accountOrganization
+    usage.accountOrganization,
+    identity.accountEmail,
+    identity.email,
+    usage.accountEmail,
+    entry.accountEmail
   );
   const plan = usefulPlan(
     usage.plan,
@@ -709,6 +722,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  CCUSAGE_PKG,
   accountHash,
   codexBarEntryToProvider,
   collectCodexBarProviders,

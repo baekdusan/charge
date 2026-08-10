@@ -2,15 +2,17 @@
 // charge-connect CLI — 앱에서 받은 페어링 코드로 연결하고 자동 수집을 등록한다.
 //
 // 사용법:
-//   npx charge-connect <페어링코드>   # 페어링 + 첫 수집 + 스케줄 등록 (일반 사용자용 원라이너)
+//   npx charge-connect <페어링코드> [--label 이름]  # 페어링 + 첫 수집 + 스케줄 등록 (원라이너)
+//                                    # --label(또는 CHARGE_LABEL)로 앱에 표시될 기기명 지정, 기본은 호스트명
 //   charge-connect run               # 수집 1회 (스케줄러가 호출)
-//   charge-connect unpair            # 페어링 해제
+//   charge-connect unpair            # 페어링 해제 (서버 디바이스 토큰도 폐기)
 //
 // 설정 파일: ~/.charge/config.json (CHARGE_HOME으로 위치 변경 가능)
 
 const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
+const { CCUSAGE_PKG } = require("./collect.js"); // 버전 고정을 한 곳에서 관리
 
 const HOME = process.env.HOME ?? process.env.USERPROFILE;
 const CONF_DIR = process.env.CHARGE_HOME ?? path.join(HOME, ".charge");
@@ -28,6 +30,17 @@ const CLOUD = (() => {
   }
 })();
 
+// 앱 기기 목록에 표시될 이름 — 기본은 호스트명이지만 실명이 든 경우가 흔하므로
+// 최초 페어링 때 --label 또는 CHARGE_LABEL로 덮어쓸 수 있게 하고, 무엇으로 등록되는지 알려준다.
+// 주의: 라벨은 서버가 같은 머신을 알아보는 유일한 키다(중복제거). 이미 페어링된 머신을
+// 다른 라벨로 재페어링하면 새 디바이스로 잡혀 일별 사용량이 이중 집계되므로, 사후 변경은 권하지 않는다.
+function resolveLabel() {
+  const i = process.argv.indexOf("--label");
+  const flag = i > -1 && process.argv[i + 1] && !process.argv[i + 1].startsWith("-") ? process.argv[i + 1] : null;
+  const raw = flag ?? process.env.CHARGE_LABEL ?? require("node:os").hostname();
+  return String(raw).trim().slice(0, 64) || require("node:os").hostname();
+}
+
 async function pair(code) {
   const url = process.env.CHARGE_URL ?? CLOUD.url;
   const anon = process.env.CHARGE_ANON ?? CLOUD.anon;
@@ -35,10 +48,11 @@ async function pair(code) {
     console.error("백엔드 주소가 없습니다 (collector/cloud.json 또는 CHARGE_URL/CHARGE_ANON).");
     process.exit(1);
   }
+  const label = resolveLabel();
   const res = await fetch(`${url}/rest/v1/rpc/charge_claim_pairing_code`, {
     method: "POST",
     headers: { apikey: anon, Authorization: `Bearer ${anon}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ p_code: code, p_label: require("node:os").hostname() }),
+    body: JSON.stringify({ p_code: code, p_label: label }),
     signal: AbortSignal.timeout(15_000),
   });
   const token = res.ok ? await res.json() : null;
@@ -52,7 +66,29 @@ async function pair(code) {
   try { fs.chmodSync(CONF_DIR, 0o700); } catch {}
   fs.writeFileSync(CONF, JSON.stringify({ url, anon, token }, null, 2), { mode: 0o600 });
   try { fs.chmodSync(CONF, 0o600); } catch {}
-  console.log("✓ 페어링 완료");
+  console.log(`✓ 페어링 완료 — 이 컴퓨터가 '${label}'(으)로 등록되었습니다.`);
+}
+
+// 페어링 해제: 서버의 디바이스 토큰까지 폐기한다.
+// 로컬 config만 지우면 그 토큰은 서버에서 계속 유효해, 유출됐을 경우 남이 업로드에 쓸 수 있다.
+async function unpair() {
+  let conf = null;
+  try { conf = JSON.parse(fs.readFileSync(CONF, "utf8")); } catch {}
+  if (conf?.url && conf?.anon && conf?.token) {
+    try {
+      const res = await fetch(`${conf.url}/rest/v1/rpc/charge_revoke_device`, {
+        method: "POST",
+        headers: { apikey: conf.anon, Authorization: `Bearer ${conf.anon}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ p_token: conf.token }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!res.ok) console.error(`서버 디바이스 폐기 실패 (${res.status}) — 앱 설정의 기기 목록에서 직접 제거하세요.`);
+    } catch {
+      console.error("서버 디바이스 폐기 요청에 실패했습니다 — 앱 설정의 기기 목록에서 직접 제거하세요.");
+    }
+  }
+  fs.rmSync(CONF, { force: true });
+  console.log("✓ 페어링 해제 (스케줄 해제는 install.sh/install.ps1 안내 참고)");
 }
 
 // npx 캐시는 언제든 청소될 수 있으므로, 스케줄 등록 전에 런타임을 ~/.charge/app 으로 복사한다
@@ -96,7 +132,7 @@ async function offerCcusageInstall() {
     run("ccusage", ["--version"], { stdio: "ignore", timeout: 15_000 });
     return; // 이미 설치돼 있다
   } catch {}
-  const hint = "'npm i -g ccusage'를 해두면 수집이 빨라집니다";
+  const hint = `'npm i -g ${CCUSAGE_PKG}'를 해두면 수집이 빨라집니다`;
   // 파이프/CI처럼 물어볼 콘솔이 없으면 안내만 하고 넘어간다
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.log(`참고: ${hint} (지금은 npx 대체 실행으로 동작).`);
@@ -110,7 +146,8 @@ async function offerCcusageInstall() {
     return;
   }
   try {
-    run("npm", ["install", "-g", "ccusage"], { stdio: "inherit", timeout: 300_000 });
+    // 전역 설치도 버전을 고정한다 — @latest면 설치 시점 최신본의 라이프사이클 스크립트를 그대로 실행한다
+    run("npm", ["install", "-g", CCUSAGE_PKG], { stdio: "inherit", timeout: 300_000 });
     console.log("✓ ccusage 설치 완료");
   } catch {
     console.error(
@@ -131,8 +168,7 @@ async function offerCcusageInstall() {
     return;
   }
   if (arg === "unpair") {
-    fs.rmSync(CONF, { force: true });
-    console.log("✓ 페어링 해제 (스케줄 해제는 install.sh/install.ps1 안내 참고)");
+    await unpair();
     return;
   }
   // 페어링 코드로 간주: 페어링 → 스케줄 등록 → 첫 수집.

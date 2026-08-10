@@ -104,6 +104,21 @@ test("T07 codexBarEntryToProvider: 창 매핑·중복 길이 라벨·계정 비�
   assert.equal(provider.collector_source, "codexbar");
 });
 
+test("T07b codexBarEntryToProvider: 불투명 계정 ID가 이메일보다 우선(사전 대입 방지)", () => {
+  const email = "person@example.com";
+  const accountId = "acct_9f3c1e77-opaque";
+  const provider = C.codexBarEntryToProvider({
+    provider: "gemini",
+    usage: {
+      identity: { accountEmail: email, accountId },
+      primary: { usedPercent: 11, resetsAt: futureReset, windowMinutes: 1440 },
+    },
+  });
+  // 이메일과 불투명 ID가 모두 있으면 해시는 이메일이 아니라 불투명 ID로 계산돼야 한다
+  assert.equal(provider.account, C.accountHash(accountId));
+  assert.notEqual(provider.account, C.accountHash(email));
+});
+
 test("T08 codexBarEntryToProvider 제외 규칙 + resolveMode 우선순위", () => {
   const win = { usedPercent: 1, resetsAt: futureReset, windowMinutes: 300 };
   // claude/codex는 자체 수집 우선이므로 브리지에서 제외, 에러·빈 엔트리도 제외
