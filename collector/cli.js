@@ -85,6 +85,41 @@ function installSchedule(dir) {
   }
 }
 
+// ccusage가 전역에 없어도 수집은 npx 폴백으로 동작하지만, 5분마다 npx 해석을 거쳐
+// 느려진다. 사용자가 터미널 앞에 있는 페어링 시점에 한 번 물어보고 깔아준다.
+async function offerCcusageInstall() {
+  // Windows에서 ccusage/npm은 .cmd 셔틀이라 cmd.exe /d /c 로 감싼다 — shell:true의
+  // DEP0190 경고를 피하면서 AutoRun도 억제하는, collect.js의 runAsync와 같은 방식.
+  const run = (cmd, args, opts) =>
+    execFileSync(WIN ? process.env.ComSpec ?? "cmd.exe" : cmd, WIN ? ["/d", "/c", cmd, ...args] : args, opts);
+  try {
+    run("ccusage", ["--version"], { stdio: "ignore", timeout: 15_000 });
+    return; // 이미 설치돼 있다
+  } catch {}
+  const hint = "'npm i -g ccusage'를 해두면 수집이 빨라집니다";
+  // 파이프/CI처럼 물어볼 콘솔이 없으면 안내만 하고 넘어간다
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.log(`참고: ${hint} (지금은 npx 대체 실행으로 동작).`);
+    return;
+  }
+  const rl = require("node:readline/promises").createInterface({ input: process.stdin, output: process.stdout });
+  const answer = (await rl.question("수집 도구 ccusage를 전역 설치할까요? 수집이 빨라집니다 (Y/n) ")).trim().toLowerCase();
+  rl.close();
+  if (answer === "n" || answer === "no") {
+    console.log(`건너뜁니다 — 나중에 ${hint}.`);
+    return;
+  }
+  try {
+    run("npm", ["install", "-g", "ccusage"], { stdio: "inherit", timeout: 300_000 });
+    console.log("✓ ccusage 설치 완료");
+  } catch {
+    console.error(
+      "설치에 실패했지만 수집은 npx 대체 실행으로 계속 동작합니다." +
+        (WIN ? ` 나중에 ${hint}.` : ` 나중에 ${hint} (권한 오류라면 'sudo npm i -g ccusage').`)
+    );
+  }
+}
+
 (async () => {
   const arg = process.argv[2];
   if (!arg) {
@@ -116,6 +151,9 @@ function installSchedule(dir) {
     if (e.status === 3) guided = true;
     else console.error(`자동 수집 등록 실패: ${e.message ?? e}`);
   }
+
+  // 스케줄 등록 뒤에 물어본다 — 프롬프트에서 사용자가 자리를 비워도 자동 수집은 이미 살아 있다
+  await offerCcusageInstall();
 
   console.log("첫 수집을 실행합니다…");
   let collected = true;

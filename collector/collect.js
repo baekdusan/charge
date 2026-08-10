@@ -65,18 +65,27 @@ const DEFAULT_CODEXBAR_CLI = "/Applications/CodexBar.app/Contents/Helpers/CodexB
 
 // 모든 외부 명령은 비동기로 실행한다 — 동기(execFileSync)는 이벤트 루프를 세워
 // 진행 중인 fetch(AbortSignal 타이머 포함)를 전부 타임아웃시킨다.
-// Windows에서 npx/ccusage는 .cmd 셔틀이라 셸을 거쳐야 실행된다 (인자는 모두 고정 문자열).
 const execOpts = (timeout) => ({
   encoding: "utf8",
   maxBuffer: 64 * 1024 * 1024,
   timeout,
   env: { ...process.env, PATH: `${process.env.PATH}${EXTRA_PATH}` },
-  shell: WIN,
 });
 
 async function runAsync(cmd, args, timeout = 120_000) {
+  // Windows에서 npx/ccusage는 .cmd 셔틀이라 셸 없이는 실행되지 않는데, shell:true에
+  // 인자 배열을 주면 Node 24부터 DEP0190 경고가 붙는다. 그래서 ComSpec /d /c 로 직접
+  // 감싼다 — /d는 shell:true도 내부에서 쓰던 AutoRun 억제로, 사용자 레지스트리의
+  // AutoRun 출력(chcp·clink 등)이 JSON 파싱을 깨는 것을 막는다. 경로로 주어진 명령
+  // (CodexBar CLI 같은 .exe)은 셸이 필요 없고 cmd 인용 규칙이 공백·괄호 경로를
+  // 깨뜨리므로 직접 실행한다. cmd로 넘기는 인자는 모두 고정 문자열이다.
+  // 한계: .cmd/.bat 경로는 cmd 경유가 불가피해 특수문자(공백+괄호, &) 경로는 지원하지 않는다.
+  const viaCmd = WIN && (!/[\\/]/.test(cmd) || /\.(cmd|bat)$/i.test(cmd));
+  const [file, argv] = viaCmd
+    ? [process.env.ComSpec ?? "cmd.exe", ["/d", "/c", cmd, ...args]]
+    : [cmd, args];
   // promisify된 execFile은 실패 시에도 err.stdout/stderr를 붙여준다
-  return (await execFileAsync(cmd, args, execOpts(timeout))).stdout;
+  return (await execFileAsync(file, argv, execOpts(timeout))).stdout;
 }
 
 async function runCcusage(args) {
@@ -534,7 +543,8 @@ function parseCodexBarJSON(raw) {
 
 async function collectCodexBarProviders() {
   if (process.env.CHARGE_DISABLE_CODEXBAR === "1") return { providers: [], complete: false };
-  const cli = process.env.CHARGE_CODEXBAR_CLI
+  // 따옴표로 감싼 경로(Windows에서 흔한 습관)는 벗겨서 execFile에 그대로 넘긴다
+  const cli = process.env.CHARGE_CODEXBAR_CLI?.replace(/^"(.*)"$/s, "$1")
     ?? (!WIN && fs.existsSync(DEFAULT_CODEXBAR_CLI) ? DEFAULT_CODEXBAR_CLI : null);
   if (!cli) return { providers: [], complete: false };
 
@@ -708,6 +718,7 @@ module.exports = {
   normalizeResetAt,
   parseCodexBarJSON,
   resolveMode,
+  runAsync,
   sanitizeCachedProvider,
   titleCaseProvider,
   usefulPlan,

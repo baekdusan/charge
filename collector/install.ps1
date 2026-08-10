@@ -85,10 +85,19 @@ function Test-ChargeTaskRuns {
 }
 
 $background = $true
+$adminRetryHint = $false
 try {
     Register-ChargeTask -Background
 } catch {
     Write-Host "백그라운드 실행 등록 실패: $($_.Exception.Message)"
+    # 비관리자 PowerShell에서는 S4U(창 없는) 등록이 항상 거부된다 — 같은 계정을 관리자
+    # 권한으로 승격해 재실행하면 해결되므로 그때만 안내한다. 판별은 토큰 Claims의
+    # Administrators SID(S-1-5-32-544)로 한다 — UAC 필터드 토큰에서 이 그룹은 deny-only로
+    # 강등되는데 .Groups는 deny-only를 걸러내 버리고, .Claims에는 DenyOnlySid로 남는다.
+    # 표준 사용자(Claims에 아예 없음)에게 안내하면 다른 관리자 계정으로 승격해 그 계정
+    # 프로필로 작업을 덮어쓰게 되고, 아래 Test-ChargeTaskRuns 폴백(SeBatchLogonRight 부재)은
+    # 승격으로 해결되지 않는다 — 두 경우 모두 안내하지 않는다.
+    $adminRetryHint = [Security.Principal.WindowsIdentity]::GetCurrent().Claims.Value -contains "S-1-5-32-544"
     $background = $false
 }
 if ($background -and -not (Test-ChargeTaskRuns)) {
@@ -105,6 +114,10 @@ if (-not $background) {
         exit 1
     }
     Write-Host "참고: 5분마다 콘솔 창이 잠깐 보일 수 있습니다 (백그라운드 실행 권한이 없는 환경)."
+    if ($adminRetryHint) {
+        Write-Host "창이 뜨지 않게 하려면: 관리자 권한 PowerShell에서 아래를 한 번 실행하세요."
+        Write-Host "  powershell -ExecutionPolicy Bypass -File `"$scriptDir\install.ps1`""
+    }
 }
 
 Write-Host "등록 완료: $taskName (5분 간격). 로그: $log"
