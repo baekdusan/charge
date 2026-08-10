@@ -355,7 +355,7 @@ begin
     name = excluded.name,
     plan = excluded.plan,
     -- 레거시 수집기(collected_at 미전송 = now() 취급)는 신선도 가드를 그대로 통과하므로 한 겹 더:
-    -- 세션 창이 비어 있는 업로드(만료 토큰 기기의 캐시 폴백)는 아직 유효한 세션을 지우지 못한다.
+    -- 레이트리밋 창이 비어 있는 업로드(만료 토큰 기기의 캐시 폴백)는 아직 유효한 창을 지우지 못한다.
     -- 리셋 시각이 지나면 조건이 풀려 정상적으로 비워지니 유령 게이지는 생기지 않는다.
     session = case
       when coalesce(jsonb_typeof(excluded.session), 'null') = 'null'
@@ -363,8 +363,19 @@ begin
            and coalesce(charge_safe_ts(cp.session->>'resets_at'), '-infinity'::timestamptz) > now()
       then cp.session
       else excluded.session end,
-    weekly = excluded.weekly,
-    extras = excluded.extras,
+    weekly = case
+      when coalesce(jsonb_typeof(excluded.weekly), 'null') = 'null'
+           and jsonb_typeof(cp.weekly) = 'object'
+           and coalesce(charge_safe_ts(cp.weekly->>'resets_at'), '-infinity'::timestamptz) > now()
+      then cp.weekly
+      else excluded.weekly end,
+    extras = case
+      when coalesce(jsonb_typeof(excluded.extras), 'null') = 'null'
+           and jsonb_typeof(cp.extras) = 'array'
+           and exists (select 1 from jsonb_array_elements(cp.extras) e
+                       where charge_safe_ts(e->'window'->>'resets_at') > now())
+      then cp.extras
+      else excluded.extras end,
     status = excluded.status,
     device_id = excluded.device_id,
     device_label = excluded.device_label,
