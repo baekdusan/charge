@@ -17,12 +17,17 @@ create table if not exists public.charge_devices (
   token_hash text not null unique,   -- sha256(토큰) — 원문은 저장하지 않는다
   label text,
   created_at timestamptz not null default now(),
-  last_seen_at timestamptz
+  last_seen_at timestamptz,
+  collect_status jsonb               -- 프로바이더 id → "ok"|"auth_expired"|"stale"|"error" (null = 미상, 구버전 수집기)
 );
+
+-- 기존 DB 마이그레이션 (create table if not exists는 기존 테이블에 컬럼을 더하지 않는다)
+alter table public.charge_devices add column if not exists collect_status jsonb;
 
 -- MARK: 데이터 테이블
 -- daily/live는 디바이스(머신)별 행 — 여러 컴퓨터가 서로 덮어쓰지 않고, 앱이 날짜별로 합산해 표시한다.
--- providers는 계정 단위 값(레이트리밋·플랜)이라 최신 업로드가 덮어쓰는 게 맞다.
+-- providers는 계정 단위 값(레이트리밋·플랜) — 단, 업로드 도착 순서가 아니라 수집 시각(collected_at)이
+-- 더 신선한 쪽만 덮어쓴다. 토큰 만료 기기의 캐시 폴백이 건강한 기기 데이터를 지우는 것 방지.
 
 create table if not exists public.charge_daily (
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -59,9 +64,13 @@ create table if not exists public.charge_providers (
   status jsonb,
   device_id uuid references public.charge_devices(id) on delete cascade,  -- 마지막 보고 머신 (계정 전환·기기 삭제 시 유령 카드 정리용)
   device_label text,                 -- 이 계정을 마지막으로 보고한 머신 이름 (계정이 여럿일 때 앱에 표시)
+  collected_at timestamptz,          -- 소스에서 실제로 수집된 시각 (null = collected_at 도입 전 수집기가 쓴 행)
   updated_at timestamptz not null default now(),
   primary key (user_id, id, account)
 );
+
+-- 기존 DB 마이그레이션
+alter table public.charge_providers add column if not exists collected_at timestamptz;
 
 create table if not exists public.charge_pairing_codes (
   code text primary key,
@@ -204,12 +213,27 @@ begin
   return tok;
 end $$;
 
+-- 잘못된 타임스탬프 문자열이 섞여 와도 업로드 전체가 죽지 않게 null로 삼키는 파서
+-- stable(immutable 아님): text::timestamptz 캐스트는 세션 TimeZone 설정에 의존한다
+create or replace function public.charge_safe_ts(p text)
+returns timestamptz
+language plpgsql stable
+as $$
+begin
+  return p::timestamptz;
+exception when others then
+  return null;
+end $$;
+
 -- 수집기(anon)가 호출: 디바이스 토큰으로 본인 행 upsert
+-- 시그니처가 바뀌면 create or replace가 오버로드를 만들어 PostgREST RPC가 모호성 오류를 내므로 구버전을 먼저 지운다
+drop function if exists public.charge_upload(text, jsonb, jsonb, jsonb);
 create or replace function public.charge_upload(
   p_token text,
   p_daily jsonb default '[]'::jsonb,
   p_live jsonb default null,
-  p_providers jsonb default '[]'::jsonb
+  p_providers jsonb default '[]'::jsonb,
+  p_collect_status jsonb default null
 )
 returns void
 language plpgsql security definer set search_path = public, extensions
@@ -243,8 +267,19 @@ begin
      or octet_length(coalesce(p_live, 'null'::jsonb)::text) > 64 * 1024 then
     raise exception 'payload too large';
   end if;
+  -- collect_status: 프로바이더 id → 상태 문자열 평면 객체만 허용.
+  -- 값 타입까지 잠근다 — 중첩 객체가 저장되면 앱의 [String: String] 디코딩이 터져
+  -- 클라우드 데이터 로드 전체(기기 삭제 UI 포함)가 막힌다.
+  if p_collect_status is not null
+     and (jsonb_typeof(p_collect_status) <> 'object'
+          or octet_length(p_collect_status::text) > 8 * 1024
+          or exists (select 1 from jsonb_each(p_collect_status) kv
+                     where jsonb_typeof(kv.value) <> 'string')) then
+    raise exception 'invalid collect_status';
+  end if;
 
-  update charge_devices set last_seen_at = now() where token_hash = v_hash;
+  -- collect_status는 null이어도 그대로 덮는다 — 구버전 수집기의 미상은 미상으로 남긴다
+  update charge_devices set last_seen_at = now(), collect_status = p_collect_status where token_hash = v_hash;
 
   -- period를 합리적 범위로 제한(무한 과거/미래 행 방지)하고, 숫자는 음수·NaN·Infinity를
   -- 걷어내고, models blob은 행당 64KB로 제한한다. period 범위 + 기존 은퇴 로직이
@@ -308,20 +343,34 @@ begin
       and exists (select 1 from jsonb_array_elements(p_providers) p where p->>'id' = cp.id);
   end if;
 
-  insert into charge_providers (user_id, id, account, name, plan, session, weekly, extras, status, device_id, device_label, updated_at)
+  -- 신선도 가드: 토큰 만료 기기가 캐시 폴백(레이트리밋 창 드롭된 값)을 5분마다 올려
+  -- 건강한 기기가 쓴 행을 덮는 것을 막는다 — 수집 시각이 더 신선한 업로드만 갱신(WHERE 거짓이면 기존 행 유지).
+  -- 미래 시각은 now()로 클램프(시계 오차·조작 방어), collected_at 없는 레거시 수집기는 now()라 기존처럼 항상 이긴다.
+  insert into charge_providers as cp (user_id, id, account, name, plan, session, weekly, extras, status, device_id, device_label, collected_at, updated_at)
   select v_user, p->>'id', coalesce(p->>'account', ''), p->>'name', p->>'plan',
-         p->'session', p->'weekly', p->'extras', p->'status', v_device, v_label, now()
+         p->'session', p->'weekly', p->'extras', p->'status', v_device, v_label,
+         least(coalesce(charge_safe_ts(p->>'collected_at'), now()), now()), now()
   from jsonb_array_elements(p_providers) p
   on conflict (user_id, id, account) do update set
     name = excluded.name,
     plan = excluded.plan,
-    session = excluded.session,
+    -- 레거시 수집기(collected_at 미전송 = now() 취급)는 신선도 가드를 그대로 통과하므로 한 겹 더:
+    -- 세션 창이 비어 있는 업로드(만료 토큰 기기의 캐시 폴백)는 아직 유효한 세션을 지우지 못한다.
+    -- 리셋 시각이 지나면 조건이 풀려 정상적으로 비워지니 유령 게이지는 생기지 않는다.
+    session = case
+      when coalesce(jsonb_typeof(excluded.session), 'null') = 'null'
+           and jsonb_typeof(cp.session) = 'object'
+           and coalesce(charge_safe_ts(cp.session->>'resets_at'), '-infinity'::timestamptz) > now()
+      then cp.session
+      else excluded.session end,
     weekly = excluded.weekly,
     extras = excluded.extras,
     status = excluded.status,
     device_id = excluded.device_id,
     device_label = excluded.device_label,
-    updated_at = now();
+    collected_at = excluded.collected_at,
+    updated_at = now()
+  where excluded.collected_at >= coalesce(cp.collected_at, '-infinity'::timestamptz);
 end $$;
 
 -- 함수 권한: 기본 public 실행 권한을 회수하고 필요한 롤에만 부여
@@ -331,8 +380,11 @@ grant execute on function public.charge_create_pairing_code() to authenticated;
 revoke execute on function public.charge_claim_pairing_code(text, text) from public;
 grant execute on function public.charge_claim_pairing_code(text, text) to anon, authenticated;
 
-revoke execute on function public.charge_upload(text, jsonb, jsonb, jsonb) from public;
-grant execute on function public.charge_upload(text, jsonb, jsonb, jsonb) to anon, authenticated;
+-- charge_safe_ts는 내부 헬퍼 — RPC로 노출할 이유가 없다 (charge_upload는 security definer라 소유자 권한으로 호출 가능)
+revoke execute on function public.charge_safe_ts(text) from public;
+
+revoke execute on function public.charge_upload(text, jsonb, jsonb, jsonb, jsonb) from public;
+grant execute on function public.charge_upload(text, jsonb, jsonb, jsonb, jsonb) to anon, authenticated;
 
 -- 수집기(anon)가 호출: unpair 시 서버의 디바이스 토큰을 폐기한다.
 -- 로컬 config만 지우면 그 토큰은 서버에서 계속 유효해, 유출 시 남이 업로드에 쓸 수 있다.
