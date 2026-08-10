@@ -79,6 +79,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "dry-run이 exit $LASTEXITCODE 로 죽음" }
           if ($out -notmatch 'dry-run') { throw "dry-run 요약 줄이 없음" }
 
+      # runAsync가 cmd.exe를 /d 없이 부르면 사용자 레지스트리의 AutoRun(chcp·clink 등)
+      # 출력이 명령 출력 앞에 붙어 ccusage JSON 파싱이 조용히 죽는다. 러너에는 AutoRun이
+      # 없으므로 직접 심어서, /d 가 실제로 억제하는지 검증한다.
+      - name: runAsync — cmd AutoRun 억제 (/d)
+        working-directory: collector
+        run: |
+          $key = 'HKCU:\Software\Microsoft\Command Processor'
+          if (-not (Test-Path $key)) { New-Item -Path $key | Out-Null }
+          New-ItemProperty -Path $key -Name AutoRun -Value 'echo AUTORUN-POLLUTION' -Force | Out-Null
+          try {
+            $probe = "require('./collect.js').runAsync('node', ['-p', '12321']).then(o => { if (o.includes('AUTORUN')) { console.error('AutoRun 출력이 섞였다: ' + o); process.exit(2); } if (!o.includes('12321')) { console.error('명령이 안 돌았다: ' + o); process.exit(3); } console.log('AutoRun 억제 OK'); })"
+            node -e $probe
+            if ($LASTEXITCODE -ne 0) { throw "runAsync AutoRun 검증 실패 ($LASTEXITCODE)" }
+          } finally {
+            Remove-ItemProperty -Path $key -Name AutoRun -Force
+          }
+
       - name: collect.js — 페어링 없이 업로드하면 안내 후 exit 1
         working-directory: collector
         timeout-minutes: 12
