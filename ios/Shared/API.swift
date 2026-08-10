@@ -152,7 +152,7 @@ enum ChargeAPI {
         async let deviceRows: [CollectorDevice] = get(
             cloud.url,
             cloud.anon,
-            "charge_devices?select=id,label,last_seen_at&order=last_seen_at.desc.nullslast",
+            "charge_devices?select=id,label,last_seen_at,collect_status&order=last_seen_at.desc.nullslast",
             bearer: jwt
         )
         // 디바이스별 live 중 만료 안 된 가장 최신 블록 (여러 머신이 각자 보고)

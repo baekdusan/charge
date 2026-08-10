@@ -233,13 +233,23 @@ struct ContentView: View {
     private func deviceStatusRow(_ device: CollectorDevice, at now: Date) -> some View {
         let isTracking = device.isTracking(at: now)
         let displayName = device.shortLabel ?? String(localized: "Linked PC")
+        // 수집 경고는 추적 중일 때만 — 오프라인 기기는 주황 점(Waiting)이 이미 상태를 말해준다
+        let issues = isTracking ? device.collectIssues : []
         return HStack(spacing: 10) {
             Circle()
-                .fill(isTracking ? Color.green : Color.orange)
+                .fill(isTracking ? (issues.isEmpty ? Color.green : Color.yellow) : Color.orange)
                 .frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 1) {
                 Text(isTracking ? "PC tracking active" : "Waiting for PC")
                     .font(.caption.weight(.semibold))
+                ForEach(issues) { issue in
+                    Text(issue.isAuthExpired
+                         ? String(localized: "\(issue.providerName) sign-in expired — open \(issue.providerName) on this PC once")
+                         : String(localized: "\(issue.providerName) collection failing on this PC"))
+                        .font(.caption2)
+                        .foregroundStyle(.yellow)
+                        .lineLimit(2)
+                }
                 if let lastSeen = device.lastSeenDate {
                     let relative = lastSeen.formatted(
                         .relative(presentation: .numeric, unitsStyle: .abbreviated)
@@ -358,6 +368,15 @@ struct ContentView: View {
                 Text(desc)
                     .font(.caption2)
                     .foregroundStyle(.orange)
+            }
+            // 수집 시각이 30분 넘게 지난 스냅샷 — 게이지가 현재 상태가 아닐 수 있음을 알린다
+            if let collected = p.collectedDate, Date().timeIntervalSince(collected) > 30 * 60 {
+                let relative = collected.formatted(
+                    .relative(presentation: .numeric, unitsStyle: .abbreviated)
+                )
+                Text("Data from \(relative)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             if let state = p.session?.displayState() {
                 gaugeRow(title: p.session?.label ?? String(localized: "Session"), state: state)

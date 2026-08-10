@@ -104,9 +104,22 @@ struct Provider: Codable, Identifiable {
     let status: ProviderStatus?
     var account: String? = nil      // 계정 해시 — 머신마다 계정이 다르면 카드가 분리된다
     var deviceLabel: String? = nil  // 이 계정을 마지막으로 보고한 머신 이름
+    var collectedAt: String? = nil  // 수집기가 실제 소스에서 데이터를 얻은 시각 — 레거시 수집기는 nil
 
     /// 계정까지 포함한 고유 식별자 (같은 프로바이더의 계정별 카드 구분용)
     var uid: String { "\(id)#\(account ?? "")" }
+
+    private static let isoFrac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let iso = ISO8601DateFormatter()
+
+    var collectedDate: Date? {
+        guard let collectedAt else { return nil }
+        return Self.isoFrac.date(from: collectedAt) ?? Self.iso.date(from: collectedAt)
+    }
 
     /// "Dusanui-MacBookPro.local" → "Dusanui-MacBookPro"
     var deviceShortLabel: String? {
@@ -236,6 +249,8 @@ struct CollectorDevice: Codable, Identifiable {
     let id: String
     let label: String?
     let lastSeenAt: String?
+    /// 프로바이더 id → 수집 상태 ("ok" | "auth_expired" | "stale" | "error") — 레거시 수집기는 nil
+    var collectStatus: [String: String]? = nil
 
     private static let isoFrac: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -261,6 +276,30 @@ struct CollectorDevice: Codable, Identifiable {
         guard let seen = lastSeenDate else { return false }
         let age = now.timeIntervalSince(seen)
         return age >= -60 && age <= 12 * 60
+    }
+
+    /// 수집 실패 프로바이더 한 건 — 안내 문구에 쓸 표시 이름과 상태
+    struct CollectIssue: Identifiable {
+        let providerId: String
+        let providerName: String
+        let status: String
+        var id: String { providerId }
+        var isAuthExpired: Bool { status.hasPrefix("auth_expired") }
+    }
+
+    /// 경고로 보여줄 항목만 추린다 — "auth_expired"/"error"류(접두 매칭)만 경고.
+    /// "ok"·"stale"은 물론 미래에 추가될 모르는 상태값도 경고로 치지 않는다 (구버전 앱 오경보 방지)
+    var collectIssues: [CollectIssue] {
+        (collectStatus ?? [:])
+            .filter { $0.value.hasPrefix("auth_expired") || $0.value.hasPrefix("error") }
+            .sorted { $0.key < $1.key }
+            .map { pid, status in
+                CollectIssue(
+                    providerId: pid,
+                    providerName: ChargeConfig.knownProviders[pid] ?? pid.capitalized,
+                    status: status
+                )
+            }
     }
 }
 

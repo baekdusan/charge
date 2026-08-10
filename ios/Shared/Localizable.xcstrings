@@ -4,6 +4,16 @@
     "%@" : {
 
     },
+    "%@ collection failing on this PC" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 수집이 이 PC에서 실패하고 있어요"
+          }
+        }
+      }
+    },
     "%@ limit just reset." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -11,6 +21,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 한도가 방금 리셋됐어요."
+          }
+        }
+      }
+    },
+    "%@ sign-in expired — open %@ on this PC once" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 로그인이 만료됐어요 — 이 PC에서 %2$@를 한 번 열어 주세요"
           }
         }
       }
@@ -411,6 +431,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "현재 5시간 창"
+          }
+        }
+      }
+    },
+    "Data from %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 데이터"
           }
         }
       }
