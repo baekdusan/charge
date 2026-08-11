@@ -255,13 +255,24 @@ async function collectLive() {
   return (data.blocks ?? []).find((b) => b.isActive) ?? null;
 }
 
-// Claude Code 자격증명: macOS는 Keychain, Windows/Linux는 ~/.claude/.credentials.json
+// Claude Code 자격증명: macOS는 Keychain, Windows/Linux는 ~/.claude/.credentials.json.
+// macOS라도 SSH 세션의 Claude Code는 Keychain에 못 쓰고 파일에 토큰을 갱신하므로
+// 한 곳만 읽으면 낡은 토큰으로 401/429를 반복할 수 있다. 둘 다 읽어 최신 쪽을 쓴다.
+function freshestCredentials(sources) {
+  const expiresAt = (c) => Number((c?.claudeAiOauth ?? c)?.expiresAt) || 0;
+  return sources.reduce((a, b) => (expiresAt(b) > expiresAt(a) ? b : a));
+}
+
 async function claudeCredentials() {
+  const sources = [];
   try {
-    return JSON.parse(await runAsync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"]));
-  } catch {
-    return JSON.parse(fs.readFileSync(path.join(HOME, ".claude", ".credentials.json"), "utf8"));
-  }
+    sources.push(JSON.parse(await runAsync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"])));
+  } catch {}
+  try {
+    sources.push(JSON.parse(fs.readFileSync(path.join(HOME, ".claude", ".credentials.json"), "utf8")));
+  } catch {}
+  if (!sources.length) throw new Error("Claude Code 자격증명 없음");
+  return freshestCredentials(sources);
 }
 
 // Claude: Claude Code OAuth 세션을 재사용해 공식 usage API 조회.
@@ -798,6 +809,7 @@ module.exports = {
   collectCodexBarProviders,
   dropExpired,
   durationLabel,
+  freshestCredentials,
   normalizeRateWindow,
   normalizeResetAt,
   parseCodexBarJSON,

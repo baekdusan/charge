@@ -243,6 +243,20 @@ test("T09d claudeProvider: 401→auth_expired, 5xx→error, 성공→ok+collecte
   assert.equal(missing.status, null);
 });
 
+test("T09e freshestCredentials: expiresAt이 더 나중인 소스를 고른다 (SSH 세션이 파일에만 토큰을 갱신하는 경우)", () => {
+  const keychain = { claudeAiOauth: { accessToken: "old", expiresAt: 1000 } };
+  const file = { claudeAiOauth: { accessToken: "new", expiresAt: 2000 } };
+  assert.equal(C.freshestCredentials([keychain, file]).claudeAiOauth.accessToken, "new");
+  assert.equal(C.freshestCredentials([file, keychain]).claudeAiOauth.accessToken, "new");
+  // 소스가 하나뿐이면 그대로, expiresAt이 없으면(구형 포맷) 앞선 소스 유지
+  assert.equal(C.freshestCredentials([keychain]).claudeAiOauth.accessToken, "old");
+  assert.equal(
+    C.freshestCredentials([{ claudeAiOauth: { accessToken: "a" } }, { claudeAiOauth: { accessToken: "b" } }])
+      .claudeAiOauth.accessToken,
+    "a",
+  );
+});
+
 test("T10 collectCodexBarProviders: CLI가 도는 동안 이벤트 루프가 살아있다 (Claude fetch 기아 회귀 방지)",
   { skip: process.platform === "win32" }, async () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "charge-test-"));
