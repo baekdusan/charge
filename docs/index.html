@@ -15,16 +15,21 @@
     code { background: rgba(120, 120, 128, 0.12); padding: 2px 6px; border-radius: 4px;
            font-family: ui-monospace, SF Mono, Menlo, monospace; font-size: 0.9em; }
     .en { border-top: 1px solid rgba(120, 120, 128, 0.25); margin-top: 2.5rem; padding-top: 1.5rem; }
+    .cta { display: inline-block; margin: 0.6rem 0 1.4rem; padding: 12px 22px; border-radius: 12px;
+           background: #b4830a; color: #fff; font-weight: 600; text-decoration: none; }
     @media (prefers-color-scheme: dark) {
       body { background: #111214; color: #f2f2f7; }
       p, li { color: #d1d1d6; }
       a { color: #e0b13e; }
+      .cta { background: #e0b13e; color: #1c1c1e; }
     }
   </style>
 </head>
 <body>
   <h1>⚡ Charge</h1>
   <p class="tagline">AI 코딩 툴의 사용량과 비용을 iPhone에서 · Your AI coding usage on iPhone</p>
+
+  <p><a class="cta" href="https://apps.apple.com/app/id6796766465">App Store에서 받기 · Download on the App Store</a></p>
 
   <p>Charge는 Claude Code, Codex 같은 AI 코딩 툴의 세션·주간 한도와 비용을 iPhone 앱과 위젯으로 보여줍니다. 데스크톱의 가벼운 수집기가 5분마다 사용량 통계만 업로드하며, 코드나 대화 내용은 절대 전송하지 않습니다.</p>
 
@@ -53,6 +58,8 @@
     <p>Charge shows session/weekly limits and costs of AI coding tools like Claude Code and Codex on your iPhone. A lightweight desktop collector uploads usage statistics only — never your code or conversations.</p>
     <p>To get started: sign in with Apple, then paste the command shown in the app into your terminal: <code>npx charge-connect &lt;pairing-code&gt;</code> (Node.js 18+, macOS/Windows).</p>
     <p>For questions or bug reports, contact <a href="mailto:dusanisbaek@gmail.com">dusanisbaek@gmail.com</a>. Privacy policy: <a href="privacy-en.html">English</a>.</p>
+    <p><a class="cta" href="https://apps.apple.com/app/id6796766465">Download on the App Store</a></p>
   </div>
+  <script src="inapp-browser.js" defer></script>
 </body>
 </html>

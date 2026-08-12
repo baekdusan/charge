@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex">
+  <title>Charge — 인앱 브라우저 진단</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+           max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #1c1c1e; }
+    h1 { font-size: 1.3rem; }
+    p, li { color: #3a3a3c; }
+    pre { background: rgba(120, 120, 128, 0.12); padding: 12px 14px; border-radius: 10px;
+          font-family: ui-monospace, SF Mono, Menlo, monospace; font-size: 0.8rem;
+          white-space: pre-wrap; word-break: break-all; }
+    .cta { display: inline-block; margin: 0.6rem 0; padding: 12px 22px; border-radius: 12px;
+           background: #b4830a; color: #fff; font-weight: 600; text-decoration: none; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #111214; color: #f2f2f7; }
+      p, li { color: #d1d1d6; }
+      .cta { background: #e0b13e; color: #1c1c1e; }
+    }
+  </style>
+</head>
+<body>
+  <h1>인앱 브라우저 진단</h1>
+  <p>인스타그램 프로필·스토리·DM에 이 페이지 링크를 올려 실기기에서 열어 확인하세요. 아래 버튼을 누르면 일반 브라우저에서는 App Store로 바로 가고, 인앱 브라우저에서는 탈출을 시도합니다.</p>
+
+  <p><a class="cta" href="https://apps.apple.com/app/id6796766465">App Store에서 받기</a></p>
+
+  <h2>감지 결과</h2>
+  <pre id="detect">…</pre>
+
+  <script src="inapp-browser.js"></script>
+  <script>
+    const info = ChargeInAppBrowser.detect();
+    const strategy = info.isIOS && info.isInstagram ? "instagram-extbrowser"
+      : info.isIOS && info.isFacebook ? "x-safari"
+      : info.isAndroid ? "android-intent"
+      : info.isIOS ? "x-safari"
+      : "(없음 — 일반 브라우저로 판단하면 링크 그대로 이동)";
+    document.getElementById("detect").textContent =
+      JSON.stringify(info, null, 2) + "\n\n탈출 전략: " + strategy;
+  </script>
+</body>
+</html>
