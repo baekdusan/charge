@@ -114,10 +114,27 @@ enum ChargeAPI {
     /// 캐시가 무효화됐는지(기기 삭제 등) UI가 확인해 화면의 이전 스냅샷도 함께 비울 수 있게 한다
     static var hasCache: Bool { cachedPayload != nil }
 
-    /// 계정 모드(charge_live)용 행 — v1 LiveRow와 달리 id 컬럼이 없다
+    /// 계정 모드(charge_live)용 행, v1 LiveRow와 달리 id 컬럼이 없다.
+    /// collected_at(수집기가 실제로 블록을 읽은 시각)은 select=*로 함께 온다, 컬럼명을 나열하면
+    /// 서버 마이그레이션이 배포보다 늦은 순간에 조회 전체가 400으로 죽는다.
     private struct AccountLiveRow: Codable {
         let activeBlock: ActiveBlock?
         let updatedAt: String?
+        var collectedAt: String? = nil
+
+        private static let isoFrac: ISO8601DateFormatter = {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return f
+        }()
+        private static let iso = ISO8601DateFormatter()
+
+        private static func parse(_ s: String?) -> Date? {
+            guard let s else { return nil }
+            return isoFrac.date(from: s) ?? iso.date(from: s)
+        }
+
+        var updatedDate: Date? { Self.parse(updatedAt) }
     }
 
     static func fetchAll() async throws -> UsagePayload {
@@ -155,16 +172,24 @@ enum ChargeAPI {
             "charge_devices?select=id,label,last_seen_at,collect_status&order=last_seen_at.desc.nullslast",
             bearer: jwt
         )
-        // 디바이스별 live 중 만료 안 된 가장 최신 블록 (여러 머신이 각자 보고)
+        // 디바이스별 live 중 만료 안 된 블록 하나 (여러 머신이 각자 보고).
+        // "가장 최근에 업로드한 행"이 아니라 "블록 시작이 가장 늦은 행"을 고른다 , 
+        // 수집이 깨진 기기가 캐시된 옛 블록을 5분마다 재업로드하면 updated_at 기준으로는
+        // 그 낡은 블록이 계속 이겨 최대 5시간 동안 live 게이지를 차지한다.
         let lives = try await liveRows
-        let activeLive = lives.first { row in
-            guard let block = row.activeBlock else { return false }
-            return !block.isExpired
-        }?.activeBlock
+        let selectedLive = lives
+            .filter { $0.activeBlock.map { !$0.isExpired } ?? false }
+            .max { a, b in
+                let sa = a.activeBlock?.start ?? .distantPast
+                let sb = b.activeBlock?.start ?? .distantPast
+                if sa != sb { return sa < sb }
+                return (a.updatedDate ?? .distantPast) < (b.updatedDate ?? .distantPast)
+            }
         return UsagePayload(
-            generatedAt: lives.first?.updatedAt,
+            // 표시 중인 블록을 올린 행의 시각, lives.first는 선택된 블록과 무관한 다른 기기일 수 있다
+            generatedAt: selectedLive?.collectedAt ?? selectedLive?.updatedAt ?? lives.first?.updatedAt,
             daily: mergeDaily(try await daily),
-            live: activeLive,
+            live: selectedLive?.activeBlock,
             providers: try await providerRows,
             devices: try await deviceRows
         )

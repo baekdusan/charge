@@ -4,14 +4,25 @@ import Foundation
 /// (App Store 심사원이 수집기 없이 앱을 평가할 수 있어야 하고,
 ///  위젯 갤러리 프리뷰도 같은 데이터를 쓴다 — 픽스처의 정본은 이 파일 하나다)
 enum DemoData {
-    /// 프로세스당 1회 생성해 고정한다 — resetsAt이 호출마다 바뀌면 위젯 지문이 매번 달라져
-    /// 60초 폴링이 내용 변화 없이도 reloadAllTimelines를 반복하게 된다.
-    /// 카운트다운 표시는 어차피 뷰(TimelineView)가 현재 시각 기준으로 그린다.
-    static let payload: UsagePayload = make()
+    /// 접근 시점 기준으로 매번 다시 만든다, 프로세스 시작 시각에 고정하면 앱을 20분만 켜둬도
+    /// collectedAt이 staleAge를 넘겨 모든 카드에 "Data from N min ago"가 붙고 위젯 게이지가 흐려진다.
+    /// (같은 이유로 lastSeenAt은 12분 뒤 "추적 중"이 풀리고, live 블록은 3.2시간 뒤 만료된다.
+    ///  심사, 스크린샷이 통째로 그 상태로 걸린다.)
+    /// 다만 기준 시각은 수집 주기(5분) 격자로 내림해 같은 격자 안에서는 값이 완전히 동일하다 , 
+    /// resetsAt이 호출마다 흔들리면 위젯 지문이 매번 달라져 60초 폴링이 내용 변화 없이도
+    /// reloadAllTimelines를 반복하게 된다. 카운트다운 표시는 어차피 뷰(TimelineView)가 현재 시각으로 그린다.
+    static var payload: UsagePayload { make(now: gridNow()) }
 
     private static let iso = ISO8601DateFormatter()
 
-    private static func make(now: Date = Date()) -> UsagePayload {
+    /// 데모 값의 기준 시각, 실제 수집 주기와 같은 5분 격자로 내린다
+    private static func gridNow(_ date: Date = Date()) -> Date {
+        let grid: TimeInterval = 5 * 60
+        let t = date.timeIntervalSinceReferenceDate
+        return Date(timeIntervalSinceReferenceDate: (t / grid).rounded(.down) * grid)
+    }
+
+    private static func make(now: Date) -> UsagePayload {
         func at(_ seconds: TimeInterval) -> String { iso.string(from: now.addingTimeInterval(seconds)) }
 
         // 세션 창: 5시간 중 3시간 경과(60%), 주간 창: 7일 중 4.2일 경과
@@ -27,7 +38,9 @@ enum DemoData {
             )],
             status: ProviderStatus(indicator: "none", description: nil),
             account: "demo-claude",
-            deviceLabel: "Demo-MacBookPro.local"
+            deviceLabel: "Demo-MacBookPro.local",
+            // 수집 시각, 수집 상태까지 채운다, 비워두면 앱은 "상태 미상", 위젯은 낡은 스냅샷으로 그린다
+            collectedAt: at(-90)
         )
         let codex = Provider(
             id: "codex",
@@ -38,7 +51,8 @@ enum DemoData {
             extras: nil,
             status: ProviderStatus(indicator: "none", description: nil),
             account: "demo-codex",
-            deviceLabel: "Demo-MacBookPro.local"
+            deviceLabel: "Demo-MacBookPro.local",
+            collectedAt: at(-90)
         )
         let gemini = Provider(
             id: "gemini",
@@ -49,7 +63,8 @@ enum DemoData {
             extras: nil,
             status: ProviderStatus(indicator: "none", description: nil),
             account: "demo-gemini",
-            deviceLabel: "Demo-MacBookPro.local"
+            deviceLabel: "Demo-MacBookPro.local",
+            collectedAt: at(-90)
         )
 
         // 진행 중인 5시간 블록: 1.8시간 경과, $6.42 사용
@@ -66,7 +81,8 @@ enum DemoData {
         let device = CollectorDevice(
             id: "demo-device",
             label: "Demo-MacBookPro.local",
-            lastSeenAt: at(-90)
+            lastSeenAt: at(-90),
+            collectStatus: ["claude": "ok", "codex": "ok", "gemini": "ok"]
         )
 
         return UsagePayload(

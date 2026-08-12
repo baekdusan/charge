@@ -274,6 +274,16 @@
         }
       }
     },
+    "Charge can't read %@ usage on this PC" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC에서 %@ 사용량을 읽지 못하고 있어요"
+          }
+        }
+      }
+    },
     "Chart" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -441,6 +451,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 데이터"
+          }
+        }
+      }
+    },
+    "Data out of date" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오래된 데이터"
           }
         }
       }
@@ -1193,6 +1213,16 @@
         }
       }
     },
+    "Sign in to an AI tool on this PC to see usage" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC에서 AI 도구에 로그인하면 사용량이 보여요"
+          }
+        }
+      }
+    },
     "Sign in to see your usage." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1357,6 +1387,36 @@
         }
       }
     },
+    "Tracking (no AI tools found)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추적 중 (AI 도구 없음)"
+          }
+        }
+      }
+    },
+    "Tracking (status unknown)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추적 중 (상태 미상)"
+          }
+        }
+      }
+    },
+    "Try signing in again in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@에서 다시 로그인해 보세요"
+          }
+        }
+      }
+    },
     "Two provider gauges with time markers." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1386,6 +1446,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "이 컴퓨터의 연결을 해제할까요?"
+          }
+        }
+      }
+    },
+    "Update the collector on this PC to see per-provider status" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC의 수집기를 업데이트하면 프로바이더별 상태를 볼 수 있어요"
           }
         }
       }

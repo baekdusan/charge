@@ -235,19 +235,49 @@ struct ContentView: View {
         let displayName = device.shortLabel ?? String(localized: "Linked PC")
         // 수집 경고는 추적 중일 때만 — 오프라인 기기는 주황 점(Waiting)이 이미 상태를 말해준다
         let issues = isTracking ? device.collectIssues : []
+        // 상태를 안 보내는 구버전 수집기는 "이상 없음"이 아니라 "모름"이다, 초록불로 단언하지 않는다
+        let statusUnknown = isTracking && issues.isEmpty && device.isLegacyCollector
+        // 최신 수집기인데 볼 프로바이더가 하나도 없는 PC(자격증명 전무), 구버전과 같은 안내를 하면
+        // "업데이트하세요"라는, 해봐야 아무것도 안 바뀌는 말이 된다
+        let noProviders = isTracking && issues.isEmpty && device.hasNoProviders
         return HStack(spacing: 10) {
             Circle()
-                .fill(isTracking ? (issues.isEmpty ? Color.green : Color.yellow) : Color.orange)
+                .fill(!isTracking ? Color.orange
+                      : !issues.isEmpty ? Color.yellow
+                      : statusUnknown || noProviders ? Color.secondary : Color.green)
                 .frame(width: 9, height: 9)
             VStack(alignment: .leading, spacing: 1) {
-                Text(isTracking ? "PC tracking active" : "Waiting for PC")
+                Text(!isTracking ? "Waiting for PC"
+                     : statusUnknown ? "Tracking (status unknown)"
+                     : noProviders ? "Tracking (no AI tools found)" : "PC tracking active")
                     .font(.caption.weight(.semibold))
                 ForEach(issues) { issue in
-                    Text(issue.isAuthExpired
-                         ? String(localized: "\(issue.providerName) sign-in expired — open \(issue.providerName) on this PC once")
-                         : String(localized: "\(issue.providerName) collection failing on this PC"))
+                    // 원인을 단정하지 않는다, 로그인 만료로 보이던 사례가 SSH 세션의 토큰 저장 위치
+                    // 문제였던 적이 있어, 관측한 사실(못 읽고 있다)과 시도해볼 조치를 분리해 적는다
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Charge can't read \(issue.providerName) usage on this PC")
+                            .font(.caption2)
+                            .foregroundStyle(.yellow)
+                            .lineLimit(2)
+                        if issue.isAuthExpired {
+                            Text("Try signing in again in \(issue.providerName)")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(2)
+                        }
+                    }
+                }
+                if statusUnknown {
+                    Text("Update the collector on this PC to see per-provider status")
                         .font(.caption2)
-                        .foregroundStyle(.yellow)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                }
+                if noProviders {
+                    // 수집기는 멀쩡하다, 읽을 도구가 없는 것이라 할 수 있는 조치가 다르다
+                    Text("Sign in to an AI tool on this PC to see usage")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                         .lineLimit(2)
                 }
                 if let lastSeen = device.lastSeenDate {
@@ -329,7 +359,10 @@ struct ContentView: View {
     }
 
     private func providerCard(_ p: Provider, duplicates: Set<String>) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        // 나이 문구와 게이지 톤은 같은 판정을 봐야 한다, 한 번만 재서 둘 다에 넘긴다
+        let freshness = p.freshness()
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 HStack(spacing: 6) {
                     ProviderGlyph(providerId: p.id, name: p.name)
@@ -369,31 +402,51 @@ struct ContentView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
-            // 수집 시각이 30분 넘게 지난 스냅샷 — 게이지가 현재 상태가 아닐 수 있음을 알린다
-            if let collected = p.collectedDate, Date().timeIntervalSince(collected) > 30 * 60 {
-                let relative = collected.formatted(
-                    .relative(presentation: .numeric, unitsStyle: .abbreviated)
-                )
-                Text("Data from \(relative)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
+            collectionAgeLine(freshness)
             if let state = p.session?.displayState() {
-                gaugeRow(title: p.session?.label ?? String(localized: "Session"), state: state)
+                gaugeRow(
+                    title: p.session?.label ?? String(localized: "Session"),
+                    state: state,
+                    stale: freshness.isStale
+                )
             }
             if let state = p.weekly?.displayState() {
-                gaugeRow(title: p.weekly?.label ?? String(localized: "Weekly"), state: state)
+                gaugeRow(
+                    title: p.weekly?.label ?? String(localized: "Weekly"),
+                    state: state,
+                    stale: freshness.isStale
+                )
             }
             ForEach(p.extras ?? []) { e in
                 if let state = e.window.displayState() {
-                    gaugeRow(title: e.window.label ?? e.name, state: state)
+                    gaugeRow(title: e.window.label ?? e.name, state: state, stale: freshness.isStale)
                 }
             }
         }
         .cardStyle()
     }
 
-    private func gaugeRow(title: String, state: RateWindowDisplayState) -> some View {
+    /// 수집된 지 오래된 스냅샷, 게이지가 현재 상태가 아닐 수 있음을 알린다.
+    /// 임계값은 위젯과 공유한다(ChargeFreshness), 안 그러면 같은 데이터가 위젯에선 경고, 앱에선 정상이다.
+    /// 시각을 모르는(NULL) 스냅샷에는 아무 말도 하지 않는다, "방금"으로도, "옛날"로도 읽히면 안 된다
+    @ViewBuilder
+    private func collectionAgeLine(_ freshness: CollectionFreshness) -> some View {
+        if freshness.isStale {
+            // 시각이 비상식적이면(미래, 30일 초과) 나이 대신 "오래된 데이터"라고만 한다 , 
+            // 침묵하면 가장 낡은 데이터가 오히려 아무 경고 없이 정상으로 읽힌다
+            let relative = freshness.ageDate?.formatted(
+                .relative(presentation: .numeric, unitsStyle: .abbreviated)
+            )
+            Text(relative.map { String(localized: "Data from \($0)") }
+                 ?? String(localized: "Data out of date"))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// stale: 이 프로바이더의 스냅샷이 묵었을 때, 위젯과 같은 톤으로 게이지를 낮춘다.
+    /// 임계값만 공유하고 처리가 갈리면(위젯은 흐리게, 앱은 밝게) 같은 데이터가 두 곳에서 다르게 읽힌다.
+    private func gaugeRow(title: String, state: RateWindowDisplayState, stale: Bool = false) -> some View {
         let window = state.window
 
         return VStack(alignment: .leading, spacing: 4) {
@@ -415,10 +468,10 @@ struct ContentView: View {
             }
             if window.timeProgress != nil {
                 TimelineView(.periodic(from: .now, by: 60)) { _ in
-                    usageGauge(window, isEstimated: state.isEstimated)
+                    usageGauge(window, isEstimated: state.isEstimated, stale: stale)
                 }
             } else {
-                usageGauge(window, isEstimated: state.isEstimated)
+                usageGauge(window, isEstimated: state.isEstimated, stale: stale)
             }
             HStack(spacing: 3) {
                 Text("\(Int(window.percent))%")
@@ -446,23 +499,26 @@ struct ContentView: View {
         }
     }
 
-    private func usageGauge(_ window: RateWindow, isEstimated: Bool) -> some View {
+    private func usageGauge(_ window: RateWindow, isEstimated: Bool, stale: Bool = false) -> some View {
         let usage = min(1, max(0, window.percent / 100))
         let timeProgress = window.timeProgress
         let tint: Color = window.percent >= critThreshold ? .red
             : window.percent >= warnThreshold ? .orange
             : .green
+        // 추정값이든 묵은 스냅샷이든 "지금 상태가 아니다"는 같은 말이라 시각 처리를 하나로 쓴다
+        // (낡음은 바로 위 나이 문구가 별도 요소로 읽히므로 접근성 라벨은 건드리지 않는다)
+        let faded = isEstimated || stale
 
         return GeometryReader { geo in
             ZStack {
                 Capsule()
-                    .fill(.white.opacity(isEstimated ? 0.07 : 0.13))
+                    .fill(.white.opacity(faded ? 0.07 : 0.13))
                     .frame(height: 5)
                 Capsule()
-                    .fill(tint.opacity(isEstimated ? 0.45 : 1))
+                    .fill(tint.opacity(faded ? 0.45 : 1))
                     .frame(width: geo.size.width * usage, height: 5)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .blur(radius: isEstimated ? 0.45 : 0)
+                    .blur(radius: faded ? 0.45 : 0)
                 if let timeProgress {
                     let markerWidth = 2.0
                     let markerCenter = min(
@@ -470,10 +526,10 @@ struct ContentView: View {
                         max(markerWidth / 2, geo.size.width * timeProgress)
                     )
                     RoundedRectangle(cornerRadius: 1)
-                        .fill(.white.opacity(isEstimated ? 0.45 : 0.9))
+                        .fill(.white.opacity(faded ? 0.45 : 0.9))
                         .frame(width: markerWidth, height: 10)
                         .position(x: markerCenter, y: geo.size.height / 2)
-                        .blur(radius: isEstimated ? 0.45 : 0)
+                        .blur(radius: faded ? 0.45 : 0)
                 }
             }
         }

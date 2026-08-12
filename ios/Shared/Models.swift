@@ -94,6 +94,43 @@ extension DailyUsage {
     }
 }
 
+/// 수집 신선도 판정의 단일 기준, 앱 카드와 위젯이 같은 값을 봐야
+/// 같은 데이터가 위젯에선 경고, 앱에선 정상으로 보이는 일이 없다
+enum ChargeFreshness {
+    /// 표시 중인 스냅샷이 이만큼 묵으면 낡은 것으로 본다 (수집 주기 5분의 네 배)
+    static let staleAge: TimeInterval = 20 * 60
+    /// 여기를 넘는 나이는 데이터가 아니라 시계가 이상한 것, 나이를 말하지 않는 경계
+    static let implausibleAge: TimeInterval = 30 * 86400
+    /// 기기 시계가 조금 앞서는 정도는 봐준다
+    static let futureSlack: TimeInterval = 60 * 60
+}
+
+/// 스냅샷 하나의 신선도. "흐리게 할까"와 "나이를 말할 수 있나"는 다른 질문이라 함께 답한다.
+enum CollectionFreshness {
+    /// 임계값 안, 그대로 밝게
+    case fresh(Date)
+    /// 수집 시각을 알고, 그게 오래됨, 흐리게 + "N분 전 데이터"
+    case stale(Date)
+    /// 미래, 30일 초과 등 시각 자체를 믿을 수 없음, 나이는 못 말해도 정상인 척 밝게 두면 안 된다
+    case untrusted
+    /// 수집 시각 미상(구버전 수집기), 판정 유보라서 흐리게 하지 않는다
+    case unknown
+
+    /// 게이지, 숫자를 낮춰야 하는가
+    var isStale: Bool {
+        switch self {
+        case .fresh, .unknown: return false
+        case .stale, .untrusted: return true
+        }
+    }
+
+    /// "N분 전 데이터"에 쓸 수 있는 시각, nil이면 나이 대신 "오래된 데이터"라고만 한다
+    var ageDate: Date? {
+        if case .stale(let d) = self { return d }
+        return nil
+    }
+}
+
 struct Provider: Codable, Identifiable {
     let id: String
     let name: String
@@ -119,6 +156,21 @@ struct Provider: Codable, Identifiable {
     var collectedDate: Date? {
         guard let collectedAt else { return nil }
         return Self.isoFrac.date(from: collectedAt) ?? Self.iso.date(from: collectedAt)
+    }
+
+    /// 이 프로바이더 스냅샷 하나의 신선도.
+    /// 수집은 프로바이더마다 따로 깨진다(한쪽은 정상, 한쪽은 캐시 폴백), 그래서 판정도 반드시
+    /// 프로바이더별이다. 여러 프로바이더의 최댓값으로 판정하면 옆에서 정상 수집되는 동안
+    /// 몇 시간 묵은 값이 아무 표시 없이 밝게 그려진다.
+    func freshness(at now: Date = Date()) -> CollectionFreshness {
+        guard let d = collectedDate else { return .unknown }
+        let age = now.timeIntervalSince(d)
+        // 미래거나 비상식적으로 낡은 값(시계가 어긋난 기기), 나이는 말할 수 없어도
+        // 신선한 것으로 넘기면 "가장 낡은 데이터가 가장 멀쩡해 보이는" 뒤집힌 결과가 된다
+        guard age >= -ChargeFreshness.futureSlack, age <= ChargeFreshness.implausibleAge else {
+            return .untrusted
+        }
+        return age > ChargeFreshness.staleAge ? .stale(d) : .fresh(d)
     }
 
     /// "Dusanui-MacBookPro.local" → "Dusanui-MacBookPro"
@@ -278,6 +330,14 @@ struct CollectorDevice: Codable, Identifiable {
         return age >= -60 && age <= 12 * 60
     }
 
+    /// 수집 상태 키 자체를 안 보내는 기기(구버전 수집기), 업로드는 오고 있으니 "추적 중"이지만
+    /// "이상 없음"은 아니다. 이때만 업데이트 안내가 통한다.
+    var isLegacyCollector: Bool { collectStatus == nil }
+
+    /// 최신 수집기인데 볼 프로바이더를 하나도 못 찾은 기기(자격증명이 없는 PC)는 빈 맵을 올린다.
+    /// 구버전과 같이 묶어 "업데이트하세요"라고 하면 해봐야 아무것도 안 바뀌는 안내가 된다.
+    var hasNoProviders: Bool { collectStatus?.isEmpty == true }
+
     /// 수집 실패 프로바이더 한 건 — 안내 문구에 쓸 표시 이름과 상태
     struct CollectIssue: Identifiable {
         let providerId: String
@@ -337,8 +397,10 @@ struct ActiveBlock: Codable {
     var start: Date? { Self.parse(startTime) }
     var end: Date? { Self.parse(endTime) }
 
+    /// 끝 시각을 못 읽으면 만료로 본다, 만료 아님으로 두면 그 블록이 영영 안 끝나고
+    /// live 게이지를 계속 차지한다 (표시를 잃는 쪽이 낡은 값을 붙잡는 쪽보다 낫다)
     var isExpired: Bool {
-        guard let e = end else { return false }
+        guard let e = end else { return true }
         return e < Date()
     }
 
