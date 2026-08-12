@@ -1,5 +1,5 @@
-// 인앱 브라우저 탈출 단위 테스트 — 실행: node --test docs/inapp-browser.test.js
-// 가짜 window/document 위에서 모듈을 돌려 감지·탈출 분기·클릭 배선을 검증한다 (브라우저 불필요).
+// 인앱 브라우저 탈출 단위 테스트. 실행: node --test docs/inapp-browser.test.js
+// 가짜 window/document 위에서 모듈을 돌려 감지와 탈출 분기, 클릭 배선을 검증한다 (브라우저 불필요).
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");

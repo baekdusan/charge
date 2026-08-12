@@ -2,45 +2,111 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="robots" content="noindex">
-  <title>Charge — 인앱 브라우저 진단</title>
+  <title>Charge 인앱 브라우저 진단</title>
+  <link rel="icon" href="icon.png">
+  <meta name="theme-color" content="#0b0c0e">
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
-           max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #1c1c1e; }
-    h1 { font-size: 1.3rem; }
-    p, li { color: #3a3a3c; }
-    pre { background: rgba(120, 120, 128, 0.12); padding: 12px 14px; border-radius: 10px;
-          font-family: ui-monospace, SF Mono, Menlo, monospace; font-size: 0.8rem;
-          white-space: pre-wrap; word-break: break-all; }
-    .cta { display: inline-block; margin: 0.6rem 0; padding: 12px 22px; border-radius: 12px;
-           background: #b4830a; color: #fff; font-weight: 600; text-decoration: none; }
-    @media (prefers-color-scheme: dark) {
-      body { background: #111214; color: #f2f2f7; }
-      p, li { color: #d1d1d6; }
-      .cta { background: #e0b13e; color: #1c1c1e; }
+    :root {
+      color-scheme: dark;
+      --bg: #0b0c0e;
+      --surface: #17181c;
+      --line: rgba(255, 255, 255, 0.09);
+      --text: #f2f2f7;
+      --muted: #9a9aa2;
+      --accent: #30d158;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 40px 20px calc(48px + env(safe-area-inset-bottom));
+      background: var(--bg); color: var(--text); line-height: 1.6;
+      font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 8px; font-family: var(--mono); font-size: 0.75rem;
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+    }
+    h1 { margin: 0 0 10px; font-size: 1.5rem; letter-spacing: -0.02em; }
+    p { color: #d3d3d8; font-size: 0.95rem; }
+    .cta {
+      display: inline-block; margin: 8px 0 0; padding: 14px 24px; border-radius: 14px;
+      background: var(--accent); color: #06210f; font-weight: 700; text-decoration: none;
+    }
+    h2 { margin: 40px 0 12px; font-size: 0.95rem; }
+    .rows { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+    .row {
+      display: flex; justify-content: space-between; gap: 16px; align-items: center;
+      padding: 12px 16px; background: var(--surface); font-size: 0.9rem;
+    }
+    .row + .row { border-top: 1px solid var(--line); }
+    .row span { font-family: var(--mono); font-size: 0.82rem; color: var(--muted); }
+    .yes { color: var(--accent) !important; font-weight: 700; }
+    .strategy {
+      margin-top: 12px; padding: 14px 16px; border-radius: 14px;
+      background: var(--surface); border: 1px solid var(--line);
+      font-family: var(--mono); font-size: 0.85rem; color: var(--muted); word-break: break-all;
+    }
+    /* 인앱으로 감지됐을 때만 초록으로 강조한다 */
+    .strategy.armed {
+      background: rgba(48, 209, 88, 0.1); border-color: rgba(48, 209, 88, 0.25); color: var(--accent);
+    }
+    details { margin-top: 12px; }
+    summary { font-size: 0.85rem; color: var(--muted); cursor: pointer; }
+    pre {
+      margin: 10px 0 0; padding: 14px 16px; border-radius: 14px;
+      background: var(--surface); border: 1px solid var(--line);
+      font-family: var(--mono); font-size: 0.75rem; color: #d3d3d8;
+      white-space: pre-wrap; word-break: break-all;
     }
   </style>
 </head>
 <body>
+<div class="wrap">
+  <p class="eyebrow">Charge diagnostics</p>
   <h1>인앱 브라우저 진단</h1>
-  <p>인스타그램 프로필·스토리·DM에 이 페이지 링크를 올려 실기기에서 열어 확인하세요. 아래 버튼을 누르면 일반 브라우저에서는 App Store로 바로 가고, 인앱 브라우저에서는 탈출을 시도합니다.</p>
-
-  <p><a class="cta" href="https://apps.apple.com/app/id6796766465">App Store에서 받기</a></p>
+  <p>인스타그램 프로필이나 DM에 이 링크를 올려 실기기에서 열어보세요. 아래 버튼은 일반 브라우저에서는 App Store로 바로 가고, 인앱 브라우저에서는 탈출을 시도합니다.</p>
+  <a class="cta" href="https://apps.apple.com/app/id6796766465">App Store에서 받기</a>
 
   <h2>감지 결과</h2>
-  <pre id="detect">…</pre>
+  <div class="rows" id="rows"></div>
+  <div class="strategy" id="strategy"></div>
 
-  <script src="inapp-browser.js"></script>
-  <script>
-    const info = ChargeInAppBrowser.detect();
-    const strategy = info.isIOS && info.isInstagram ? "instagram-extbrowser"
-      : info.isIOS && info.isFacebook ? "x-safari"
-      : info.isAndroid ? "android-intent"
-      : info.isIOS ? "x-safari"
-      : "(없음 — 일반 브라우저로 판단하면 링크 그대로 이동)";
-    document.getElementById("detect").textContent =
-      JSON.stringify(info, null, 2) + "\n\n탈출 전략: " + strategy;
-  </script>
+  <details>
+    <summary>User agent 원문</summary>
+    <pre id="ua"></pre>
+  </details>
+</div>
+
+<script src="inapp-browser.js"></script>
+<script>
+  const info = ChargeInAppBrowser.detect();
+  const flags = [
+    ["iOS", info.isIOS],
+    ["Android", info.isAndroid],
+    ["Instagram / Threads", info.isInstagram],
+    ["Facebook / Messenger", info.isFacebook],
+    ["인앱 브라우저", info.isInApp],
+  ];
+  document.getElementById("rows").innerHTML = flags
+    .map(function (f) {
+      return '<div class="row">' + f[0] +
+        '<span class="' + (f[1] ? "yes" : "") + '">' + (f[1] ? "YES" : "no") + "</span></div>";
+    })
+    .join("");
+
+  const strategy = info.isIOS && info.isInstagram ? "instagram://extbrowser"
+    : info.isIOS && info.isFacebook ? "window.open('x-safari-')"
+    : info.isAndroid ? "intent://"
+    : info.isIOS ? "window.open('x-safari-')"
+    : "없음 (일반 브라우저로 판단, 링크 그대로 이동)";
+  const box = document.getElementById("strategy");
+  box.textContent = "탈출 전략: " + strategy;
+  if (info.isInApp) box.className = "strategy armed";
+  document.getElementById("ua").textContent = info.ua;
+</script>
 </body>
 </html>

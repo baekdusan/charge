@@ -1,4 +1,4 @@
-// 인앱 브라우저 탈출 — 인스타그램/페이스북 웹뷰에서 App Store 링크가 먹통이 되는 문제를 우회한다.
+// 인앱 브라우저 탈출: 인스타그램/페이스북 웹뷰에서 App Store 링크가 먹통이 되는 문제를 우회한다.
 // 사용법: <script src="inapp-browser.js" defer></script>
 //   자동으로 a[href^="https://apps.apple.com"]와 [data-inapp-escape]에 붙는다.
 //   수동 배선: ChargeInAppBrowser.bind(element) 또는 ChargeInAppBrowser.openExternal(url)
@@ -20,31 +20,45 @@
 
   const TEXT = KO
     ? {
-        title: "기본 브라우저에서 열어주세요",
-        body: "인스타그램·페이스북 앱 안의 브라우저는 App Store 링크를 열지 못하게 막고 있습니다. 아래 버튼을 누르거나, 직접 기본 브라우저로 열어주세요.",
-        retry: "기본 브라우저에서 열기",
-        retried: "열리지 않았다면 아래 방법으로 열어주세요.",
+        title: "Safari에서 이어서 열기",
+        titleAndroid: "브라우저에서 이어서 열기",
+        body: function (app) {
+          return app + " 앱 안의 브라우저에서는 App Store가 열리지 않습니다.";
+        },
+        open: "Safari에서 열기",
+        openAndroid: "브라우저에서 열기",
         copy: "링크 복사",
-        copied: "복사했습니다",
+        copied: "복사했어요",
         copyFail: "길게 눌러 복사해 주세요",
         close: "닫기",
-        stepsIOS: "화면 오른쪽 위 ••• 을 누르고 <strong>“외부 브라우저에서 열기”</strong>(또는 Safari에서 열기)를 선택하세요.",
-        stepsAndroid: "화면 오른쪽 위 ⋮ 를 누르고 <strong>“다른 브라우저로 열기”</strong>를 선택하세요.",
+        hintIOS: '안 열리면 오른쪽 위 <b>•••</b> → "외부 브라우저에서 열기"',
+        hintAndroid: '안 열리면 오른쪽 위 <b>⋮</b> → "다른 브라우저로 열기"',
+        apps: { instagram: "인스타그램", facebook: "페이스북", generic: "이" },
       }
     : {
-        title: "Open this in your browser",
-        body: "The in-app browser in Instagram and Facebook blocks App Store links. Tap the button below, or open the link in your native browser.",
-        retry: "Open in my native browser",
-        retried: "Still not opening? Use the steps below.",
+        title: "Continue in Safari",
+        titleAndroid: "Continue in your browser",
+        body: function (app) {
+          return "The in-app browser in " + app + " can't open the App Store.";
+        },
+        open: "Open in Safari",
+        openAndroid: "Open in browser",
         copy: "Copy link",
         copied: "Copied",
         copyFail: "Press and hold to copy",
         close: "Close",
-        stepsIOS: "Tap ••• at the top right, then choose <strong>“Open in external browser”</strong> (or Open in Safari).",
-        stepsAndroid: "Tap ⋮ at the top right, then choose <strong>“Open in browser”</strong>.",
+        hintIOS: 'Not opening? Tap <b>•••</b> at the top right → "Open in external browser"',
+        hintAndroid: 'Not opening? Tap <b>⋮</b> at the top right → "Open in browser"',
+        apps: { instagram: "Instagram", facebook: "Facebook", generic: "this app" },
       };
 
-  // ── 감지 ────────────────────────────────────────────────────────────────
+  function appName(info) {
+    if (info.isInstagram) return TEXT.apps.instagram;
+    if (info.isFacebook) return TEXT.apps.facebook;
+    return TEXT.apps.generic;
+  }
+
+  // 감지
   // navigator를 인자로 받게 해서 테스트에서 UA 문자열을 갈아끼울 수 있게 한다.
   function detect(nav) {
     const source = nav || global.navigator || {};
@@ -58,7 +72,7 @@
     const isInstagram = /Instagram|Barcelona/i.test(ua);
     const isMessenger = /Messenger/i.test(ua);
     const isFacebook = /FBAN|FBAV|FB_IAB|FB4A|FBIOS/i.test(ua) || isMessenger;
-    // 메타 계열은 아니지만 같은 안내가 필요한 웹뷰들 (카카오톡·라인·네이버 등)
+    // 메타 계열은 아니지만 같은 안내가 필요한 웹뷰들 (카카오톡, 라인, 네이버 등)
     const isOtherInApp = /KAKAOTALK|Line\/|NAVER|DaumApps|wv\)/i.test(ua);
 
     return {
@@ -77,7 +91,7 @@
     return detect(nav).isInApp;
   }
 
-  // ── 탈출 ────────────────────────────────────────────────────────────────
+  // 탈출
   // 반드시 클릭 핸들러 안에서 동기적으로 불러야 한다. 사용한 전략 이름을 돌려주고,
   // 쏠 방법이 없으면 null을 준다 (호출부가 곧장 안내 모달을 띄운다).
   function fireEscape(url, info) {
@@ -151,40 +165,41 @@
     return true;
   }
 
-  // ── 안내 모달 ───────────────────────────────────────────────────────────
+  // 안내 모달
   let modal = null;
 
   function injectStyle() {
     if (global.document.getElementById("charge-inapp-style")) return;
     const style = global.document.createElement("style");
     style.id = "charge-inapp-style";
+    // 앱과 같은 톤 (near-black + 시스템 그린). 스팸 팝업처럼 보이지 않게 문구와 버튼을 최소로 둔다.
     style.textContent = [
       ".charge-inapp{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:flex-end;",
-      "justify-content:center;background:rgba(0,0,0,.45);font-family:-apple-system,BlinkMacSystemFont,",
-      '"Apple SD Gothic Neo",sans-serif;-webkit-tap-highlight-color:transparent}',
+      "justify-content:center;padding:0 10px calc(10px + env(safe-area-inset-bottom));",
+      "background:rgba(0,0,0,.6);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);",
+      'font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif;',
+      "-webkit-tap-highlight-color:transparent;animation:charge-inapp-fade .18s ease-out}",
       ".charge-inapp[hidden]{display:none}",
-      ".charge-inapp__sheet{width:100%;max-width:420px;margin:12px;padding:22px 20px 18px;border-radius:18px;",
-      "background:#fff;color:#1c1c1e;box-shadow:0 18px 48px rgba(0,0,0,.28);animation:charge-inapp-up .22s ease-out}",
-      "@keyframes charge-inapp-up{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}",
-      ".charge-inapp__title{margin:0 0 8px;font-size:1.05rem;font-weight:700}",
-      ".charge-inapp__body{margin:0 0 16px;font-size:.9rem;line-height:1.6;color:#3a3a3c}",
-      ".charge-inapp__retry{display:block;width:100%;padding:14px;border:0;border-radius:12px;",
-      "background:#b4830a;color:#fff;font-size:1rem;font-weight:600;cursor:pointer}",
-      ".charge-inapp__hint{margin:12px 0 0;font-size:.82rem;color:#8e8e93}",
-      ".charge-inapp__steps{margin:14px 0 0;padding:12px 14px;border-radius:12px;",
-      "background:rgba(120,120,128,.12);font-size:.85rem;line-height:1.6;color:#3a3a3c}",
-      ".charge-inapp__link{display:flex;gap:8px;align-items:center;margin-top:12px}",
-      ".charge-inapp__url{flex:1;min-width:0;padding:10px;border:1px solid rgba(120,120,128,.3);",
-      "border-radius:10px;background:transparent;color:#3a3a3c;font-size:.8rem;overflow:hidden;text-overflow:ellipsis}",
-      ".charge-inapp__copy{flex:none;padding:10px 14px;border:0;border-radius:10px;",
-      "background:rgba(120,120,128,.16);color:#1c1c1e;font-size:.85rem;font-weight:600;cursor:pointer}",
-      ".charge-inapp__close{display:block;width:100%;margin-top:10px;padding:10px;border:0;",
-      "background:none;color:#8e8e93;font-size:.85rem;cursor:pointer}",
-      "@media (prefers-color-scheme:dark){",
-      ".charge-inapp__sheet{background:#1c1d21;color:#f2f2f7}",
-      ".charge-inapp__body,.charge-inapp__steps,.charge-inapp__url{color:#d1d1d6}",
-      ".charge-inapp__retry{background:#e0b13e;color:#1c1c1e}",
-      ".charge-inapp__copy{color:#f2f2f7}}",
+      ".charge-inapp__sheet{width:100%;max-width:400px;padding:10px 20px 18px;border-radius:24px;outline:none;",
+      "background:#17181c;border:1px solid rgba(255,255,255,.09);color:#f2f2f7;text-align:center;",
+      "box-shadow:0 24px 60px rgba(0,0,0,.5);animation:charge-inapp-up .26s cubic-bezier(.2,.9,.3,1)}",
+      "@keyframes charge-inapp-fade{from{opacity:0}to{opacity:1}}",
+      "@keyframes charge-inapp-up{from{transform:translateY(22px);opacity:0}to{transform:none;opacity:1}}",
+      ".charge-inapp__grip{width:36px;height:4px;margin:0 auto 16px;border-radius:2px;background:rgba(255,255,255,.18)}",
+      ".charge-inapp__mark{display:block;margin:0 auto 14px;width:52px;height:52px}",
+      ".charge-inapp__title{margin:0 0 6px;font-size:1.12rem;font-weight:700;letter-spacing:-.01em}",
+      ".charge-inapp__body{margin:0 0 18px;font-size:.88rem;line-height:1.55;color:#9a9aa2}",
+      ".charge-inapp__open{display:block;width:100%;padding:15px;border:0;border-radius:14px;",
+      "background:#30d158;color:#06210f;font-size:1rem;font-weight:700;cursor:pointer}",
+      ".charge-inapp__open:active{opacity:.85}",
+      ".charge-inapp__row{display:flex;gap:8px;margin-top:8px}",
+      ".charge-inapp__ghost{flex:1;padding:12px;border:0;border-radius:12px;background:rgba(255,255,255,.07);",
+      "color:#f2f2f7;font-size:.88rem;font-weight:600;cursor:pointer}",
+      ".charge-inapp__ghost:active{background:rgba(255,255,255,.12)}",
+      ".charge-inapp__hint{margin:16px 0 0;font-size:.78rem;line-height:1.5;color:#71717a}",
+      ".charge-inapp__hint b{color:#9a9aa2;font-weight:700}",
+      ".charge-inapp__hint--alert{color:#9a9aa2}",
+      ".charge-inapp__hint--alert b{color:#30d158}",
     ].join("");
     global.document.head.appendChild(style);
   }
@@ -196,37 +211,39 @@
     root.setAttribute("role", "dialog");
     root.setAttribute("aria-modal", "true");
     root.hidden = true;
+    // 앱 아이콘을 인라인 SVG로 다시 그린다 (외부 이미지 없이 모듈 하나로 끝내려고)
     root.innerHTML = [
-      '<div class="charge-inapp__sheet">',
+      '<div class="charge-inapp__sheet" tabindex="-1">',
+      '<div class="charge-inapp__grip"></div>',
+      '<svg class="charge-inapp__mark" viewBox="0 0 48 48" aria-hidden="true">',
+      '<rect x="1" y="1" width="46" height="46" rx="12" fill="#111214" stroke="rgba(255,255,255,.1)"/>',
+      '<rect x="9" y="15" width="30" height="8" rx="4" fill="#4a4b4d"/>',
+      '<rect x="9" y="15" width="19" height="8" rx="4" fill="#8cf2a6"/>',
+      '<rect x="9" y="27" width="30" height="8" rx="4" fill="#4a4b4d"/>',
+      '<rect x="9" y="27" width="12" height="8" rx="4" fill="#fff"/>',
+      "</svg>",
       '<h2 class="charge-inapp__title"></h2>',
       '<p class="charge-inapp__body"></p>',
-      '<button type="button" class="charge-inapp__retry"></button>',
-      '<p class="charge-inapp__hint" hidden></p>',
-      '<div class="charge-inapp__steps"></div>',
-      '<div class="charge-inapp__link">',
-      '<div class="charge-inapp__url"></div>',
-      '<button type="button" class="charge-inapp__copy"></button>',
+      '<button type="button" class="charge-inapp__open"></button>',
+      '<div class="charge-inapp__row">',
+      '<button type="button" class="charge-inapp__copy charge-inapp__ghost"></button>',
+      '<button type="button" class="charge-inapp__close charge-inapp__ghost"></button>',
       "</div>",
-      '<button type="button" class="charge-inapp__close"></button>',
+      '<p class="charge-inapp__hint"></p>',
       "</div>",
     ].join("");
 
     const parts = {
       root: root,
+      sheet: root.querySelector(".charge-inapp__sheet"),
       title: root.querySelector(".charge-inapp__title"),
       body: root.querySelector(".charge-inapp__body"),
-      retry: root.querySelector(".charge-inapp__retry"),
+      retry: root.querySelector(".charge-inapp__open"),
       hint: root.querySelector(".charge-inapp__hint"),
-      steps: root.querySelector(".charge-inapp__steps"),
-      url: root.querySelector(".charge-inapp__url"),
       copy: root.querySelector(".charge-inapp__copy"),
       close: root.querySelector(".charge-inapp__close"),
     };
 
-    parts.title.textContent = TEXT.title;
-    parts.body.textContent = TEXT.body;
-    parts.retry.textContent = TEXT.retry;
-    parts.hint.textContent = TEXT.retried;
     parts.copy.textContent = TEXT.copy;
     parts.close.textContent = TEXT.close;
 
@@ -284,34 +301,39 @@
 
   function showModal(url, info) {
     if (!modal) modal = buildModal();
-    modal.steps.innerHTML = info.isAndroid ? TEXT.stepsAndroid : TEXT.stepsIOS;
-    modal.url.textContent = url;
-    modal.hint.hidden = true;
+    modal.title.textContent = info.isAndroid ? TEXT.titleAndroid : TEXT.title;
+    modal.body.textContent = TEXT.body(appName(info));
+    modal.retry.textContent = info.isAndroid ? TEXT.openAndroid : TEXT.open;
+    modal.hint.innerHTML = info.isAndroid ? TEXT.hintAndroid : TEXT.hintIOS;
+    modal.hint.className = "charge-inapp__hint";
+
+    // 재시도가 또 실패하면 수동 안내 쪽으로 시선을 옮긴다.
+    function highlightHint() {
+      modal.hint.className = "charge-inapp__hint charge-inapp__hint--alert";
+    }
 
     modal.retry.onclick = function () {
       // 재시도도 사용자 제스처 안에서 동기로 쏴야 iOS가 받아준다.
       const strategy = fireEscape(url, info);
       if (!strategy) {
-        modal.hint.hidden = false;
+        highlightHint();
         return;
       }
-      watchForExit(function () {
-        modal.hint.hidden = false;
-      });
+      watchForExit(highlightHint);
     };
     modal.copy.onclick = function () {
       copyToClipboard(url, modal.copy);
     };
 
     modal.root.hidden = false;
-    modal.retry.focus();
+    modal.sheet.focus();
   }
 
   function hideModal() {
     if (modal) modal.root.hidden = true;
   }
 
-  // ── 배선 ────────────────────────────────────────────────────────────────
+  // 배선
   function bind(element) {
     if (!element || element.dataset.inappBound === "1") return;
     element.dataset.inappBound = "1";
