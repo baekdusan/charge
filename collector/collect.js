@@ -115,6 +115,18 @@ function accountHash(id) {
   return require("node:crypto").createHash("sha256").update(String(id)).digest("hex").slice(0, 12);
 }
 
+// 퍼센트 수치 파싱, 값이 있을 때만 숫자를 돌려주고, 비었으면 null.
+// Number()에 맡기면 안 된다: Number(null), Number(""), Number(false), Number([])는 전부 0이고
+// finite라, "수치가 비었다"와 "진짜 0%(정상 사용 0)"가 구분되지 않는다. 빈 값이 0%로 올라가면
+// 서버 입장에선 멀쩡한 값이라(빈 창 가드는 JSON null만 보존한다) 다른 기기가 올린 게이지를 0으로 덮는다.
+// 숫자이거나 공백 아닌 숫자 문자열일 때만 값으로 인정한다.
+function percentValue(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v !== "string" || !v.trim()) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /// 리셋 시각이 이미 지난 창은 무효 처리 (리셋 후 100% 박제 방지)
 function dropExpired(w) {
   if (!w) return null;
@@ -132,10 +144,18 @@ function sanitizeCachedProvider(prev) {
   const extras = (prev.extras ?? [])
     .map((extra) => ({ ...extra, window: dropExpired(extra.window) }))
     .filter((extra) => extra.window);
+  const session = dropExpired(prev.session);
+  const weekly = dropExpired(prev.weekly);
+  // 만료를 걷어내고 표시할 창이 하나도 안 남으면 복원 대상에서 뺀다(null).
+  // 전부 null인 껍데기를 며칠 묵은 collected_at과 함께 올리면 앱엔 빈 카드가 뜨고,
+  // 서버 행의 나이가 그 옛 시각으로 되감겨 다른 기기의 묵은 업로드까지 신선도 가드를 통과한다.
+  // 결과적으로 그 프로바이더는 이번 페이로드에서 통째로 빠진다, 서버의 은퇴 delete에는
+  // 20분 유예가 있어, 한두 사이클 빠졌다가 다시 관측되면 카드가 사라지지 않는다.
+  if (!session && !weekly && !extras.length) return null;
   return {
     ...prev,
-    session: dropExpired(prev.session),
-    weekly: dropExpired(prev.weekly),
+    session,
+    weekly,
     extras: extras.length ? extras : null,
   };
 }
@@ -191,8 +211,14 @@ function explicitWindowLabel(window) {
 
 function normalizeRateWindow(window, slot, duplicateDuration = false, forcedLabel = null) {
   if (!window || typeof window !== "object") return null;
-  const percent = Number(window.usedPercent ?? window.percent ?? window.utilization);
-  if (!Number.isFinite(percent)) return null;
+  // 후보마다 percentValue를 적용해 '유효한' 첫 값을 고른다. ?? 체인은 null/undefined만
+  // 건너뛰므로 "", false, []가 앞자리에 있으면 Number()에서 0으로 둔갑해 그대로 굳었다 , 
+  // 즉 이 폴백의 의미가 "null/undefined 건너뛰기"에서 "유효하지 않은 값 건너뛰기"로 바뀐다.
+  // 빈 수치를 0%로 올리면 서버의 빈 창 가드를 통과해 다른 기기의 멀쩡한 게이지를 덮는다.
+  const percent = [window.usedPercent, window.percent, window.utilization]
+    .map(percentValue)
+    .find((value) => value !== null);
+  if (percent === undefined) return null;
   const rawMinutes = window.windowMinutes ?? window.window_minutes ?? window.durationMinutes;
   const parsedMinutes = rawMinutes == null ? null : Number(rawMinutes);
   const minutes = Number.isFinite(parsedMinutes) && parsedMinutes > 0 ? parsedMinutes : null;
@@ -250,9 +276,33 @@ async function collectDaily() {
   return [...byDay.values()].sort((a, b) => a.period.localeCompare(b.period));
 }
 
-async function collectLive() {
-  const data = await runCcusage(["blocks", "--active", "--json"]);
-  return (data.blocks ?? []).find((b) => b.isActive) ?? null;
+// run은 테스트 주입용, 기본값이면 기존 동작 그대로.
+async function collectLive({ run = runCcusage } = {}) {
+  const data = await run(["blocks", "--active", "--json"]);
+  const block = (data.blocks ?? []).find((b) => b.isActive) ?? null;
+  // collected_at = 이 블록을 실제로 관측한 시각. 서버가 charge_live 신선도 판정에 쓴다 , 
+  // 수집이 깨진 기기가 캐시된 옛 블록을 5분마다 재업로드해도 최신 블록을 덮지 못한다.
+  // 캐시 폴백은 cache.live를 통째로 재사용하므로 이 값이 갱신되지 않고 나이가 보존된다.
+  return block ? { ...block, collected_at: new Date().toISOString() } : null;
+}
+
+// 잠에서 깬 직후에는 스케줄러가 Wi-Fi보다 먼저 돌아 fetch가 즉시 "fetch failed"로 죽는다.
+// 그 사이클을 통째로 버리면 다음 5분까지 묵은 캐시가 올라가므로, 네트워크 계층 실패(HTTP
+// 응답을 못 받은 경우)만 짧게 한 번 더 시도한다. 상태 코드가 온 요청은 재시도하지 않는다
+// (401을 두 번 물어봐야 답이 같고, 5분마다 도는 작업이라 재시도는 최소로).
+// 타임아웃 시그널은 반드시 시도마다 새로 만든다, 호출자가 만든 signal을 두 시도가 나눠 쓰면
+// 1차가 예산 후반에 죽었을 때 2차는 대기 시간만큼 이미 지난 예산을 물려받아 즉시 abort된다.
+// 재시도가 무의미해지는 것도 문제지만, 로그에 남는 원인이 "fetch failed"에서
+// "This operation was aborted"로 바뀌어 진짜 원인(네트워크 미연결)을 가린다.
+async function fetchOnceRetried(fetchFn, url, options, { timeoutMs = 10_000, delayMs = 4000 } = {}) {
+  const attempt = () => fetchFn(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+  try {
+    return await attempt();
+  } catch (e) {
+    if (e?.name === "AbortError" || e?.name === "TimeoutError") throw e;
+    await new Promise((r) => setTimeout(r, delayMs));
+    return attempt();
+  }
 }
 
 // Claude Code 자격증명: macOS는 Keychain, Windows/Linux는 ~/.claude/.credentials.json.
@@ -296,10 +346,10 @@ async function claudeProvider({ fetchFn = fetch, loadCredentials = claudeCredent
       : oauth.subscriptionType
         ? oauth.subscriptionType[0].toUpperCase() + oauth.subscriptionType.slice(1)
         : null;
-    const res = await fetchFn("https://api.anthropic.com/api/oauth/usage", {
+    // signal은 넘기지 않는다, fetchOnceRetried가 시도마다 새 10초 예산을 만들어 붙인다
+    const res = await fetchOnceRetried(fetchFn, "https://api.anthropic.com/api/oauth/usage", {
       headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
-      signal: AbortSignal.timeout(10_000),
-    });
+    }, { timeoutMs: 10_000 });
     if (!res.ok) {
       // 401 = 토큰 만료 (Claude Code를 한 번 실행하면 갱신됨), 그 외는 일시 장애일 가능성.
       // 이 구분이 서버 collect_status로 올라가 앱이 "재로그인 필요"를 안내할 수 있다.
@@ -316,28 +366,41 @@ async function claudeProvider({ fetchFn = fetch, loadCredentials = claudeCredent
       });
       if (pr.ok) account = accountHash((await pr.json()).account?.uuid);
     } catch {}
-    const win = (w, mins) =>
-      w ? { percent: w.utilization ?? 0, resets_at: w.resets_at ?? null, window_minutes: mins } : null;
+    // 200인데 수치가 비어 있으면 창을 버린다. 0%로 대신 채우면 그건 서버의 빈 창 가드를
+    // 통과하는 "정상 값"이라, 다른 기기가 올린 멀쩡한 게이지를 0으로 덮어버린다.
+    const win = (w, mins) => {
+      const percent = percentValue(w?.utilization);
+      return percent === null ? null : { percent, resets_at: w.resets_at ?? null, window_minutes: mins };
+    };
     // limits 배열의 weekly_scoped 항목 = 모델별 주간 한도 (예: "Fable only")
-    const extras = (d.limits ?? [])
-      .filter((l) => l.kind === "weekly_scoped" && l.scope?.model?.display_name)
-      .map((l) => ({
-        name: l.scope.model.display_name,
+    const extras = (d.limits ?? []).flatMap((l) => {
+      const name = l?.kind === "weekly_scoped" ? l.scope?.model?.display_name : null;
+      const percent = percentValue(l?.percent);
+      if (!name || percent === null) return [];
+      return [{
+        name,
         window: {
-          percent: l.percent ?? 0,
+          percent,
           resets_at: l.resets_at ?? null,
           window_minutes: 10080,
-          label: `${l.scope.model.display_name} weekly`,
+          label: `${name} weekly`,
         },
-      }));
+      }];
+    });
+    const session = dropExpired(win(d.five_hour, 300));
+    const weekly = dropExpired(win(d.seven_day, 10080));
+    // codexProvider와 같은 규칙: 올릴 창이 하나도 없으면 프로바이더 자체를 올리지 않는다.
+    // percentValue 도입 후 이 경로가 실제로 생긴다 (200 응답인데 utilization이 비어 있는 경우).
+    // 전부 null인 행을 신선한 스탬프로 올리면 서버에서 빈 카드가 이긴다.
+    if (!session && !weekly && !extras.length) return { provider: null, status: "stale" };
     return {
       provider: {
         id: "claude",
         name: "Claude",
         plan,
         account,
-        session: dropExpired(win(d.five_hour, 300)),
-        weekly: dropExpired(win(d.seven_day, 10080)),
+        session,
+        weekly,
         extras: extras.length ? extras : null,
         collected_at: new Date().toISOString(), // usage API 성공 시각
       },
@@ -378,29 +441,33 @@ function codexAuth() {
 // Codex 실시간 조회: Codex CLI 자신이 60초마다 폴링하는 것과 같은 엔드포인트를
 // 로컬 OAuth 토큰으로 호출한다. 토큰 갱신은 하지 않는다 — 만료됐으면 null을 반환하고
 // 스냅샷 폴백에 맡긴다 (CLI가 다음 실행 때 알아서 갱신해 둔다).
-async function codexLiveWindows(auth) {
+// fetchFn은 테스트 주입용, 기본값이면 기존 동작 그대로.
+async function codexLiveWindows(auth, { fetchFn = fetch } = {}) {
   if (!auth?.accessToken || !auth?.accountId) return null;
   try {
-    const res = await fetch("https://chatgpt.com/backend-api/wham/usage", {
+    // signal은 넘기지 않는다, fetchOnceRetried가 시도마다 새 10초 예산을 만들어 붙인다
+    const res = await fetchOnceRetried(fetchFn, "https://chatgpt.com/backend-api/wham/usage", {
       headers: {
         Authorization: `Bearer ${auth.accessToken}`,
         "chatgpt-account-id": auth.accountId,
         "User-Agent": "charge-connect",
       },
-      signal: AbortSignal.timeout(10_000),
-    });
+    }, { timeoutMs: 10_000 });
     if (!res.ok) return null;
     const d = await res.json();
-    const win = (w) =>
-      w && Number.isFinite(Number(w.used_percent))
-        ? {
-            percent: Number(w.used_percent),
+    // 수치가 비면 0%가 아니라 창 없음, 0%는 서버의 빈 창 가드를 통과해 게이지를 덮는다
+    const win = (w) => {
+      const percent = percentValue(w?.used_percent);
+      return percent === null
+        ? null
+        : {
+            percent,
             resets_at: w.reset_at ? new Date(w.reset_at * 1000).toISOString() : null,
             window_minutes: Number.isFinite(Number(w.limit_window_seconds))
               ? Math.round(Number(w.limit_window_seconds) / 60)
               : null,
-          }
-        : null;
+          };
+    };
     const session = win(d.rate_limit?.primary_window);
     const weekly = win(d.rate_limit?.secondary_window);
     if (!session && !weekly) return null;
@@ -411,23 +478,36 @@ async function codexLiveWindows(auth) {
   }
 }
 
-// Codex 스냅샷 폴백: 가장 최근 세션 로그(.jsonl)에 기록된 마지막 rate_limits —
-// 마지막으로 Codex를 실제 사용한 시점의 값이라 실시간 조회가 실패했을 때만 쓴다
-function codexSnapshotWindows() {
-  const dir = path.join(HOME, ".codex", "sessions");
+// 최신 .jsonl에 rate_limits가 없는 경우가 흔하다(막 연 세션, 한도 응답 전에 끝난 세션).
+// 그렇다고 전부 훑으면 세션 로그가 수천 개인 사용자에서 5분 주기를 넘기므로 최근 몇 개만 본다.
+// 5개는 너무 빡빡했다, 짧은 세션이 연달아 다섯 번이면 여섯 번째의 멀쩡한 스냅샷을 놓치고
+// "관측 실패(error)"로 보고해 앱에 경고가 뜬다. 파일당 읽기는 개별 try로 감싸져 있다.
+const SNAPSHOT_SCAN_FILES = 20;
+// 파일당 읽는 꼬리 크기, 마지막 rate_limits는 파일 끝에 있다 (전체를 읽으면 수십 MB를 파싱하게 된다)
+const SNAPSHOT_TAIL_BYTES = 2 * 1024 * 1024;
+
+// Codex 스냅샷 폴백: 최근 세션 로그(.jsonl)에 기록된 마지막 rate_limits , 
+// 마지막으로 Codex를 실제 사용한 시점의 값이라 실시간 조회가 실패했을 때만 쓴다.
+// 반환: null = 볼 스냅샷이 아예 없음(미설치, 최근 로그에 rate_limits 없음),
+// { session, weekly, collected_at } = 스냅샷은 있었음. 만료 창은 여기서 이미 걸러지므로
+// 둘 다 null일 수 있고, 그건 "관측은 했는데 리셋이 다 지났다"는 뜻이다(호출자가 stale로 판정).
+// dir은 테스트 주입용, 기본값이면 기존 동작 그대로.
+async function codexSnapshotWindows(dir = path.join(HOME, ".codex", "sessions")) {
   if (!fs.existsSync(dir)) return null; // Codex 미설치
-  let latest = null;
+  const files = [];
   (function walk(d) {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) walk(p);
       else if (e.name.endsWith(".jsonl")) {
-        const m = fs.statSync(p).mtimeMs;
-        if (!latest || m > latest.m) latest = { p, m };
+        try {
+          files.push({ p, m: fs.statSync(p).mtimeMs });
+        } catch {}
       }
     }
   })(dir);
-  if (!latest) return null;
+  if (!files.length) return null;
+  files.sort((a, b) => b.m - a.m);
 
   const findRL = (o) => {
     if (!o || typeof o !== "object") return null;
@@ -438,45 +518,96 @@ function codexSnapshotWindows() {
     }
     return null;
   };
-  let rl = null;
-  for (const line of fs.readFileSync(latest.p, "utf8").split("\n")) {
-    if (!line.includes('"rate_limits"')) continue;
+  // 세션 로그는 수십 MB까지 자란다(실측 최대 43MB). 통째로 동기 읽기를 하면 그동안 이벤트 루프가
+  // 멈춰 진행 중인 fetch의 AbortSignal 타이머가 전부 터진다, 이 파일 맨 위에서 금지한 바로 그 패턴이다.
+  // 그래서 비동기로, 그것도 꼬리 SNAPSHOT_TAIL_BYTES만 읽는다. 우리가 찾는 건 "마지막" rate_limits라
+  // 꼬리에 없으면 그 파일의 값은 어차피 낡은 것이고, 더 최근 파일이 우선순위를 갖는다.
+  const lastRateLimits = async (file) => {
+    let handle = null;
     try {
-      rl = findRL(JSON.parse(line)) ?? rl;
-    } catch {}
+      handle = await fs.promises.open(file, "r");
+      const { size } = await handle.stat();
+      const start = Math.max(0, size - SNAPSHOT_TAIL_BYTES);
+      const buf = Buffer.alloc(Math.min(size, SNAPSHOT_TAIL_BYTES));
+      await handle.read(buf, 0, buf.length, start);
+      let rl = null;
+      for (const line of buf.toString("utf8").split("\n")) {
+        if (!line.includes('"rate_limits"')) continue;
+        try {
+          // 꼬리를 자른 지점의 첫 줄은 조각날 수 있다, 파싱 실패는 그냥 건너뛴다
+          rl = findRL(JSON.parse(line)) ?? rl;
+        } catch {}
+      }
+      return rl;
+    } catch {
+      return null;
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  };
+  let found = null;
+  for (const f of files.slice(0, SNAPSHOT_SCAN_FILES)) {
+    const rl = await lastRateLimits(f.p);
+    if (rl) {
+      found = { rl, m: f.m };
+      break;
+    }
   }
-  if (!rl) return null;
-  const win = (w) =>
-    w
-      ? {
-          percent: w.used_percent ?? 0,
+  if (!found) return null;
+  // 수치가 비면 0%가 아니라 창 없음, 0%는 서버의 빈 창 가드를 통과해 게이지를 덮는다
+  const win = (w) => {
+    const percent = percentValue(w?.used_percent);
+    return percent === null
+      ? null
+      : {
+          percent,
           resets_at: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null,
           window_minutes: w.window_minutes ?? null,
-        }
-      : null;
-  // collected_at = 로그 파일 mtime — 스냅샷은 "지금"이 아니라 마지막 사용 시점의 값이므로
-  // 수집 시각을 넣으면 다른 기기의 진짜 최신 데이터를 신선도 규칙에서 이겨버린다.
-  return { session: win(rl.primary), weekly: win(rl.secondary), collected_at: new Date(latest.m).toISOString() };
+        };
+  };
+  // 만료 판정을 여기서 끝낸다, 예전엔 dropExpired가 codexProvider에서야 돌아, 리셋이 다 지난
+  // 3일 묵은 스냅샷도 "창이 있다"고 통과한 뒤 그 창이 뒤늦게 전부 null이 됐다.
+  const session = dropExpired(win(found.rl.primary));
+  const weekly = dropExpired(win(found.rl.secondary));
+  // collected_at = 그 스냅샷이 들어 있던 파일의 mtime, 스냅샷은 "지금"이 아니라 마지막
+  // 사용 시점의 값이므로, 수집 시각을 넣으면 다른 기기의 진짜 최신 값을 신선도 규칙에서 이긴다.
+  return { session, weekly, collected_at: new Date(found.m).toISOString() };
 }
 
 // 반환: { provider, status } — live 성공 "ok", 스냅샷 폴백 "stale",
-// ~/.codex는 있는데 둘 다 실패면 "error", 미설치면 status null(항목 없음).
-async function codexProvider() {
-  if (!fs.existsSync(path.join(HOME, ".codex"))) return { provider: null, status: null }; // Codex 미설치
+// ~/.codex는 있는데 아무것도 관측 못 하면 "error", 미설치면 status null(항목 없음).
+// loadAuth/liveWindows/snapshotWindows/hasCodex는 테스트 주입용, 기본값이면 기존 동작 그대로.
+async function codexProvider({
+  loadAuth = codexAuth,
+  liveWindows = codexLiveWindows,
+  snapshotWindows = codexSnapshotWindows,
+  hasCodex = () => fs.existsSync(path.join(HOME, ".codex")),
+} = {}) {
+  if (!hasCodex()) return { provider: null, status: null }; // Codex 미설치
   try {
-    const auth = codexAuth();
-    const live = await codexLiveWindows(auth);
-    const snapshot = live ? null : codexSnapshotWindows();
+    const auth = loadAuth();
+    const live = await liveWindows(auth);
+    const snapshot = live ? null : await snapshotWindows();
     const windows = live ?? snapshot;
-    if (!windows) return { provider: null, status: "error" };
+    if (!windows) return { provider: null, status: "error" }; // 실시간, 스냅샷 둘 다 관측 실패
+    const session = dropExpired(windows.session);
+    const weekly = dropExpired(windows.weekly);
+    // 리셋이 다 지나 남는 창이 하나도 없으면 프로바이더 자체를 올리지 않는다. 전부 null인 행을
+    // 올리면 앱엔 빈 카드가 뜨고, 서버 행의 collected_at이 스냅샷 mtime(며칠 전)으로 되감겨
+    // 다른 기기의 묵은 업로드까지 신선도 가드를 통과한다. 대신 캐시 폴백이 마지막 값을 유지한다.
+    // 상태는 "error"가 아니다, 수집은 정상이고 데이터가 낡았을 뿐인데 error로 보고하면
+    // 앱이 "재로그인/수집 실패" 경고를 띄운다(앱은 error, auth_expired만 경고로 친다).
+    // live 조회에 성공했더라도 여기까지 왔다면 올릴 창이 없으니 "ok"가 아니라 "stale"이다 , 
+    // "ok"는 이번 사이클에 쓸 수 있는 값을 올렸다는 뜻인데, 실제로 올라가는 건 캐시 폴백뿐이다.
+    if (!session && !weekly) return { provider: null, status: "stale" };
     return {
       provider: {
         id: "codex",
         name: "Codex",
         plan: windows.plan ?? auth?.plan ?? null,
         account: auth?.account ?? null,
-        session: dropExpired(windows.session),
-        weekly: dropExpired(windows.weekly),
+        session,
+        weekly,
         extras: null,
         // live면 지금이 관측 시각, 스냅샷 폴백이면 .jsonl mtime이 실제 관측 시각
         collected_at: live ? new Date().toISOString() : snapshot.collected_at,
@@ -674,6 +805,53 @@ async function collectProviders() {
   };
 }
 
+// 서버는 (user_id, id, account) 한 행을 업서트하므로, 같은 키를 한 페이로드에 두 번 실으면
+// 한 문장 안에서 같은 행을 두 번 건드려 어느 쪽이 남을지가 배열 순서에 달린다.
+// 더 신선한 쪽만 남긴다, collected_at이 없으면 나이 미상이라 스탬프가 있는 쪽에 진다.
+function dedupeProviders(providers) {
+  const stamp = (p) => {
+    const t = Date.parse(p?.collected_at ?? "");
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  const byKey = new Map();
+  for (const p of providers) {
+    // 구분자는 NUL 이스케이프, id, account 어디에도 못 들어가는 문자여야 키가 안 겹친다
+    const key = `${p.id}\u0000${p.account ?? ""}`;
+    const prev = byKey.get(key);
+    // 동률(둘 다 미상 포함)이면 뒤엣것, 이번 사이클 수집분이 캐시 복원분보다 뒤에 온다
+    if (!prev || stamp(p) >= stamp(prev)) byKey.set(key, p);
+  }
+  return [...byKey.values()];
+}
+
+// 이번 사이클 수집 결과에 캐시 복원분을 얹고 업로드 계약(키 유일성)에 맞춰 정리한다.
+function mergeCachedProviders({ providers, cached = [], codexBarComplete = false, statuses = null }) {
+  const merged = [...providers];
+  // statuses가 null이면 수집이 통째로 죽어 아무것도 판정할 수 없는 경우, 미상 그대로 둔다
+  const nextStatuses = statuses ? { ...statuses } : statuses;
+  for (const prev of cached) {
+    if (merged.some((p) => p.id === prev.id)) continue;
+    // CodexBar가 정상 완료된 경우, 거기서 더 이상 반환하지 않는 항목은 사용자가 끈 것으로 본다.
+    if (codexBarComplete && prev.collector_source === "codexbar") continue;
+    const sanitized = sanitizeCachedProvider(prev);
+    if (!sanitized) continue;
+    // 0.1.4 이전 캐시엔 collected_at이 없다, 없는 채로 보낸다. 서버는 스탬프 없는 업로드를
+    // "최신"이 아니라 "나이 미상"으로 보고 기존 행이 충분히 묵었을 때만 받아준다.
+    // (예전엔 epoch로 찍어 지게 만들었는데, 그 값이 앱까지 새어 "56년 전"으로 보였다.)
+    merged.push(sanitized);
+    // CodexBar CLI가 통째로 실패/미검출/타임아웃이면 statuses가 비어 있어 아무도 실패로
+    // 기록되지 않는다, 판정이 없는 복원 항목만 'stale'로 채운다.
+    // 정상 수집이 남긴 판정(auth_expired/error 등)은 덮지 않는다.
+    if (nextStatuses && !nextStatuses[sanitized.id]) nextStatuses[sanitized.id] = "stale";
+  }
+  // 계정 식별 실패 시 마지막으로 알려진 계정 해시 유지 (계정 미상('')과 실제 계정 행이 갈라지는 것 방지)
+  for (const p of merged) {
+    if (!p.account) p.account = cached.find((c) => c.id === p.id)?.account ?? null;
+  }
+  // dedupe는 account 보정 뒤에, 보정으로 비로소 같은 키가 되는 경우가 있다
+  return { providers: dedupeProviders(merged), statuses: nextStatuses };
+}
+
 // 업로드 설정 — 우선순위: CHARGE_* 환경변수(테스트용) → ~/.charge/config.json(페어링)
 function resolveMode() {
   if (process.env.CHARGE_TOKEN && process.env.CHARGE_URL && process.env.CHARGE_ANON) {
@@ -688,9 +866,10 @@ function resolveMode() {
 }
 
 // 디바이스 토큰으로 charge_upload RPC 호출 (서버가 본인 행에만 기록)
-async function pairedUpload(mode, daily, live, providers, collectStatus = null) {
+// fetchFn은 테스트 주입용, 기본값이면 기존 동작 그대로.
+async function pairedUpload(mode, daily, live, providers, collectStatus = null, { fetchFn = fetch } = {}) {
   const post = (body) =>
-    fetch(`${mode.url}/rest/v1/rpc/charge_upload`, {
+    fetchFn(`${mode.url}/rest/v1/rpc/charge_upload`, {
       method: "POST",
       headers: {
         apikey: mode.anon,
@@ -711,7 +890,13 @@ async function pairedUpload(mode, daily, live, providers, collectStatus = null) 
     console.error("charge_upload 구버전 서버 감지(404/PGRST202) — p_collect_status 없이 재시도합니다");
     const { p_collect_status: _omitted, ...legacyBody } = body;
     res = await post(legacyBody);
-    if (res.ok) return;
+    if (res.ok) {
+      // 이 경로로 올라간 사이클은 collect_status가 서버에 반영되지 않는다(파라미터 자체가 없다).
+      // 상태는 매 사이클 통째로 다시 보내므로 서버가 갱신되면 다음 5분에 저절로 복구된다 , 
+      // 다만 "왜 상태가 비었나"를 로그 없이는 알 수 없어 흔적을 남긴다.
+      console.error("구버전 시그니처로 업로드 성공, collect_status는 이번 사이클 미반영(다음 사이클에 복구)");
+      return;
+    }
     throw new Error(`업로드 실패 (${res.status}): ${await res.text()}`);
   }
   throw new Error(`업로드 실패 (${res.status}): ${text}`);
@@ -743,6 +928,8 @@ async function main() {
     live = liveR.value;
   } else {
     console.error(`live 수집 실패, 이전 값 유지: ${liveR.reason?.message ?? liveR.reason}`);
+    // 캐시 블록은 collected_at을 갱신하지 않고 통째로 재사용한다, 갱신하면 수집이 깨진
+    // 기기의 옛 블록이 다른 기기의 진짜 활성 블록을 서버 신선도 규칙에서 이겨버린다.
     live = cache.live ?? null;
   }
   let providerCollection;
@@ -753,30 +940,17 @@ async function main() {
     // 수집이 통째로 죽으면 상태를 알 수 없다 — null로 보내 정직한 미상 처리 (서버도 null로 덮음)
     providerCollection = { providers: [], codexBarComplete: false, statuses: null };
   }
-  providers = providerCollection.providers;
-  // 일부 프로바이더만 실패해도 목록에서 사라지지 않게 이전 값으로 채운다 (앱 설정 토글 유지).
-  // 이렇게 캐시로 채운 프로바이더의 상태는 statuses에 이미 실패(auth_expired/error 등)로
-  // 기록돼 있다 — 캐시 복원이 성공처럼 보이면 안 되므로 여기서 덮지 않는다.
-  for (const prev of cache.providers ?? []) {
-    if (providers.some((p) => p.id === prev.id)) continue;
-    // CodexBar가 정상 완료된 경우, 거기서 더 이상 반환하지 않는 항목은 사용자가 끈 것으로 본다.
-    if (providerCollection.codexBarComplete && prev.collector_source === "codexbar") continue;
-    const sanitized = sanitizeCachedProvider(prev);
-    if (sanitized) {
-      // 0.1.4 이전 캐시엔 collected_at이 없다. 그대로 보내면 서버가 now()로 취급해
-      // 나이 미상의 캐시가 건강한 기기의 진짜 최신 데이터를 이겨버린다 — epoch로 스탬프해
-      // "언제 것인지 모르는 데이터는 항상 진다"로 만든다 (행 유지에는 지장 없음).
-      if (!sanitized.collected_at) sanitized.collected_at = new Date(0).toISOString();
-      providers.push(sanitized);
-    }
-  }
-  // 계정 식별 실패 시 마지막으로 알려진 계정 해시 유지 (계정 미상('')과 실제 계정 행이 갈라지는 것 방지)
-  for (const p of providers) {
-    if (!p.account) p.account = (cache.providers ?? []).find((c) => c.id === p.id)?.account ?? null;
-  }
+  // 일부 프로바이더만 실패해도 목록에서 사라지지 않게 이전 값으로 채운다 (앱 설정 토글 유지)
+  let statuses;
+  ({ providers, statuses } = mergeCachedProviders({
+    providers: providerCollection.providers,
+    cached: cache.providers ?? [],
+    codexBarComplete: providerCollection.codexBarComplete,
+    statuses: providerCollection.statuses,
+  }));
 
   if (DRY_RUN) {
-    console.log(JSON.stringify({ daily: daily.slice(-1), live, providers, collect_status: providerCollection.statuses }, null, 2));
+    console.log(JSON.stringify({ daily: daily.slice(-1), live, providers, collect_status: statuses }, null, 2));
     console.log(`\n[dry-run] daily ${daily.length}행 + live + providers ${providers.length}개 업로드 예정`);
     return;
   }
@@ -788,7 +962,7 @@ async function main() {
   }
 
   const now = new Date().toISOString();
-  await pairedUpload(mode, daily, live, providers, providerCollection.statuses);
+  await pairedUpload(mode, daily, live, providers, statuses);
 
   fs.writeFileSync(CACHE_FILE, JSON.stringify({ daily, live, providers }));
   console.log(`[${now}] daily ${daily.length}행 + live + providers ${providers.length}개 업로드 완료`);
@@ -806,13 +980,22 @@ module.exports = {
   accountHash,
   claudeProvider,
   codexBarEntryToProvider,
+  codexLiveWindows,
+  codexProvider,
+  codexSnapshotWindows,
   collectCodexBarProviders,
+  collectLive,
+  dedupeProviders,
   dropExpired,
   durationLabel,
+  fetchOnceRetried,
   freshestCredentials,
+  mergeCachedProviders,
   normalizeRateWindow,
   normalizeResetAt,
+  pairedUpload,
   parseCodexBarJSON,
+  percentValue,
   resolveMode,
   runAsync,
   sanitizeCachedProvider,
