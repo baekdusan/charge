@@ -5,6 +5,7 @@ import WidgetKit
 struct ContentView: View {
     @State private var daily: [DailyUsage] = []
     @State private var live: ActiveBlock?
+    @State private var liveBlocks: [DeviceActiveBlock] = []
     @State private var providers: [Provider] = []
     @State private var devices: [CollectorDevice] = []
     @State private var generatedAt: Date?
@@ -85,6 +86,7 @@ struct ContentView: View {
                         // 앱도 이전 계정 데이터를 지우고 로그인 화면으로 유도한다
                         daily = []
                         live = nil
+                        liveBlocks = []
                         providers = []
                         devices = []
                         generatedAt = nil
@@ -140,7 +142,11 @@ struct ContentView: View {
             ForEach(visibleProviders.filter { pid == nil || $0.id == pid }, id: \.uid) {
                 providerCard($0, duplicates: duplicates)
             }
-            if let live, pid == nil || pid == "claude" { liveCard(live) }
+            if pid == nil || pid == "claude" {
+                ForEach(displayLiveBlocks) { item in
+                    liveCard(item.block, deviceLabel: displayLiveBlocks.count > 1 ? item.deviceLabel : nil)
+                }
+            }
             streakCard
             chartCard
             if let today, !today.mergedModels.isEmpty {
@@ -201,6 +207,13 @@ struct ContentView: View {
     /// last_seen이 갱신될 때마다 행이 뒤바뀌지 않게 이름 기준 고정 정렬
     private var sortedDevices: [CollectorDevice] {
         devices.sorted { ($0.shortLabel ?? "", $0.id) < ($1.shortLabel ?? "", $1.id) }
+    }
+
+    /// 새 페이로드는 활성 블록을 기기별로 모두 주고, 구버전 캐시는 대표 live 하나만 가진다.
+    private var displayLiveBlocks: [DeviceActiveBlock] {
+        if !liveBlocks.isEmpty { return liveBlocks }
+        guard let live else { return [] }
+        return [DeviceActiveBlock(deviceId: "legacy", deviceLabel: nil, block: live, collectedAt: nil)]
     }
 
     private func connectionStatus(at now: Date) -> some View {
@@ -378,8 +391,8 @@ struct ContentView: View {
                         .foregroundStyle(ChargeTheme.accent)
                         .background(ChargeTheme.accent.opacity(0.15), in: Capsule())
                 }
-                if duplicates.contains(p.id), let device = p.deviceShortLabel {
-                    Label(device, systemImage: "desktopcomputer")
+                if duplicates.contains(p.id), let context = p.accountContextLabel {
+                    Label(context, systemImage: "person.crop.circle")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -390,7 +403,9 @@ struct ContentView: View {
                         .frame(width: 8, height: 8)
                 }
                 Spacer()
-                let cost = todayCost(of: p)
+                // daily 비용에는 account 키가 없으므로 계정 카드가 여러 개일 때 같은
+                // 프로바이더 합계를 각 카드의 비용인 것처럼 반복 표시하지 않는다.
+                let cost = duplicates.contains(p.id) ? 0 : todayCost(of: p)
                 if cost > 0 {
                     Text("Today \(fmtUSD(cost))")
                         .font(.caption.monospacedDigit())
@@ -547,13 +562,19 @@ struct ContentView: View {
         return "\(m)m"
     }
 
-    private func liveCard(_ block: ActiveBlock) -> some View {
+    private func liveCard(_ block: ActiveBlock, deviceLabel: String?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Circle().fill(.green).frame(width: 8, height: 8)
                 Text("Current 5h window")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if let deviceLabel {
+                    Label(deviceLabel, systemImage: "desktopcomputer")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
                 Spacer()
                 if let end = block.end {
                     Text("Resets \(end.formatted(date: .omitted, time: .shortened))")
@@ -663,6 +684,7 @@ struct ContentView: View {
             let payload = try await ChargeAPI.fetchAll()
             daily = payload.daily
             live = payload.live
+            liveBlocks = payload.liveBlocks ?? []
             // 사용자 순서는 데이터가 바뀔 때만 변한다 — 렌더마다가 아니라 로드 시 한 번 정렬
             // (설정 시트에서 순서를 바꾸면 onDismiss의 load()가 다시 반영한다)
             providers = ChargeConfig.sortedByUserOrder(payload.providers ?? [])
@@ -698,6 +720,7 @@ struct ContentView: View {
             // 로그아웃 상태 — 이전 계정 데이터를 화면에서 지우고 온보딩으로 유도
             daily = []
             live = nil
+            liveBlocks = []
             providers = []
             devices = []
             generatedAt = nil
@@ -714,6 +737,7 @@ struct ContentView: View {
             if !ChargeAPI.hasCache {
                 daily = []
                 live = nil
+                liveBlocks = []
                 providers = []
                 devices = []
                 generatedAt = nil

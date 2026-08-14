@@ -140,7 +140,9 @@ struct Provider: Codable, Identifiable {
     let extras: [ExtraWindow]?
     let status: ProviderStatus?
     var account: String? = nil      // 계정 해시 — 머신마다 계정이 다르면 카드가 분리된다
+    var deviceId: String? = nil     // 이 값을 채택한 관측의 기기 id
     var deviceLabel: String? = nil  // 이 계정을 마지막으로 보고한 머신 이름
+    var deviceLabels: [String]? = nil // 같은 계정을 현재 관측 중인 모든 머신
     var collectedAt: String? = nil  // 수집기가 실제 소스에서 데이터를 얻은 시각 — 레거시 수집기는 nil
 
     /// 계정까지 포함한 고유 식별자 (같은 프로바이더의 계정별 카드 구분용)
@@ -178,6 +180,29 @@ struct Provider: Codable, Identifiable {
         guard let l = deviceLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !l.isEmpty else { return nil }
         return l.hasSuffix(".local") ? String(l.dropLast(6)) : l
     }
+
+    /// 원문 식별자는 업로드하지 않으므로 사용자가 계정을 구분할 최소한의 안정적인 표시명.
+    /// unknown 접두사는 프로필 조회 실패로 기기별 격리된 관측임을 뜻한다.
+    var accountShortLabel: String? {
+        guard let account, !account.isEmpty else { return nil }
+        if account.hasPrefix("unknown:") { return String(localized: "Unidentified account") }
+        return String(localized: "Account") + " " + account.suffix(4).uppercased()
+    }
+
+    var accountContextLabel: String? {
+        let observed = (deviceLabels ?? [deviceShortLabel].compactMap { $0 })
+        let deviceContext: String?
+        if observed.count > 2 {
+            deviceContext = "\(observed[0]) +\(observed.count - 1)"
+        } else {
+            deviceContext = observed.joined(separator: ", ").nilIfEmpty
+        }
+        return [deviceContext, accountShortLabel].compactMap { $0 }.joined(separator: " · ").nilIfEmpty
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
 struct ProviderStatus: Codable {
@@ -361,6 +386,17 @@ struct CollectorDevice: Codable, Identifiable {
                 )
             }
     }
+}
+
+/// 동시에 활성인 5시간 블록을 기기별로 잃지 않고 전달한다.
+/// `UsagePayload.live`는 구버전 앱·위젯 호환용 대표 블록으로 계속 유지한다.
+struct DeviceActiveBlock: Codable, Identifiable {
+    let deviceId: String
+    let deviceLabel: String?
+    let block: ActiveBlock
+    let collectedAt: String?
+
+    var id: String { deviceId }
 }
 
 struct ActiveBlock: Codable {

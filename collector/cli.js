@@ -13,13 +13,121 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const { CCUSAGE_PKG } = require("./collect.js"); // 버전 고정을 한 곳에서 관리
+const { resolveInstallationID } = require("./identity.js");
+
+const PACKAGE_NAME = "charge-connect";
+const CURRENT_VERSION = (() => {
+  try { return require("./package.json").version; } catch { return null; }
+})();
 
 const HOME = process.env.HOME ?? process.env.USERPROFILE;
 const CONF_DIR = process.env.CHARGE_HOME ?? path.join(HOME, ".charge");
 const CONF = path.join(CONF_DIR, "config.json");
+const DEVICE = path.join(CONF_DIR, "device.json");
 const WIN = process.platform === "win32";
 const LINUX = process.platform === "linux";
 const INSTALLER = WIN ? "install.ps1" : LINUX ? "install.linux.sh" : "install.sh";
+
+function parseVersion(value) {
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(String(value ?? ""));
+  return match ? { numbers: match.slice(1, 4).map(Number), prerelease: match[4] ?? null } : null;
+}
+
+function isNewerVersion(current, candidate) {
+  const a = parseVersion(current);
+  const b = parseVersion(candidate);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i += 1) {
+    if (a.numbers[i] !== b.numbers[i]) return b.numbers[i] > a.numbers[i];
+  }
+  return a.prerelease !== null && b.prerelease === null;
+}
+
+function resolveNpmCLI() {
+  const candidates = [
+    process.env.npm_execpath,
+    path.join(path.dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+    path.resolve(path.dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+  ].filter(Boolean);
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+function launchUpdatedVersion(version) {
+  const npmCLI = resolveNpmCLI();
+  if (!npmCLI) throw new Error("npm 실행 파일을 찾을 수 없어 자동 업데이트할 수 없습니다.");
+  const npmArgs = path.basename(npmCLI) === "npx-cli.js"
+    ? [npmCLI, "--yes", `${PACKAGE_NAME}@${version}`, ...process.argv.slice(2)]
+    : [
+        npmCLI,
+        "exec",
+        "--yes",
+        `--package=${PACKAGE_NAME}@${version}`,
+        "--",
+        PACKAGE_NAME,
+        ...process.argv.slice(2),
+      ];
+  execFileSync(process.execPath, npmArgs, {
+    stdio: "inherit",
+    env: { ...process.env, CHARGE_UPDATE_CHECKED: "1" },
+  });
+}
+
+async function maybeUpdateBeforePairing({
+  currentVersion = CURRENT_VERSION,
+  fetchFn = globalThis.fetch,
+  interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY),
+  ask = null,
+  launch = launchUpdatedVersion,
+  env = process.env,
+  log = console.log,
+} = {}) {
+  if (!currentVersion || env.CHARGE_UPDATE_CHECKED === "1" || env.CHARGE_SKIP_UPDATE === "1") return false;
+
+  let latest;
+  try {
+    const response = await fetchFn(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`, {
+      headers: { Accept: "application/json", "User-Agent": `${PACKAGE_NAME}/${currentVersion}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    latest = (await response.json())?.version;
+  } catch (error) {
+    log(`업데이트 확인을 건너뜁니다 (${error?.message ?? error}). 현재 ${currentVersion}로 계속합니다.`);
+    return false;
+  }
+
+  if (!isNewerVersion(currentVersion, latest)) return false;
+  log(`charge-connect 새 버전 ${latest}이 있습니다 (현재 ${currentVersion}).`);
+  if (!interactive) {
+    log(`자동 업데이트하려면 'npx ${PACKAGE_NAME}@${latest} <페어링코드>'로 다시 실행하세요.`);
+    return false;
+  }
+
+  let answer;
+  if (ask) {
+    answer = await ask(`먼저 ${latest}(으)로 업데이트한 뒤 연동할까요? (Y/n) `);
+  } else {
+    const rl = require("node:readline/promises").createInterface({ input: process.stdin, output: process.stdout });
+    try {
+      answer = await rl.question(`먼저 ${latest}(으)로 업데이트한 뒤 연동할까요? (Y/n) `);
+    } finally {
+      rl.close();
+    }
+  }
+  const normalized = String(answer ?? "").trim().toLowerCase();
+  if (["n", "no", "아니오"].includes(normalized)) {
+    log(`업데이트를 건너뛰고 ${currentVersion}로 연동합니다.`);
+    return false;
+  }
+  if (!["", "y", "yes", "ok", "네"].includes(normalized)) {
+    log(`응답을 확인하지 못해 업데이트를 건너뛰고 ${currentVersion}로 연동합니다.`);
+    return false;
+  }
+
+  log(`charge-connect ${latest}(으)로 업데이트한 뒤 연동을 계속합니다…`);
+  launch(latest);
+  return true;
+}
 
 // 백엔드 주소 — collector/cloud.json (출시 시 charge 전용 프로젝트로 교체, npm 패키지에 포함)
 const CLOUD = (() => {
@@ -32,8 +140,7 @@ const CLOUD = (() => {
 
 // 앱 기기 목록에 표시될 이름 — 기본은 호스트명이지만 실명이 든 경우가 흔하므로
 // 최초 페어링 때 --label 또는 CHARGE_LABEL로 덮어쓸 수 있게 하고, 무엇으로 등록되는지 알려준다.
-// 주의: 라벨은 서버가 같은 머신을 알아보는 유일한 키다(중복제거). 이미 페어링된 머신을
-// 다른 라벨로 재페어링하면 새 디바이스로 잡혀 일별 사용량이 이중 집계되므로, 사후 변경은 권하지 않는다.
+// 기기 식별은 별도 installation id가 담당하므로 라벨이 같거나 나중에 바뀌어도 충돌하지 않는다.
 function resolveLabel() {
   const i = process.argv.indexOf("--label");
   const flag = i > -1 && process.argv[i + 1] && !process.argv[i + 1].startsWith("-") ? process.argv[i + 1] : null;
@@ -49,12 +156,30 @@ async function pair(code) {
     process.exit(1);
   }
   const label = resolveLabel();
-  const res = await fetch(`${url}/rest/v1/rpc/charge_claim_pairing_code`, {
-    method: "POST",
-    headers: { apikey: anon, Authorization: `Bearer ${anon}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ p_code: code, p_label: label }),
-    signal: AbortSignal.timeout(15_000),
-  });
+  const installationID = resolveInstallationID(DEVICE);
+  const claim = (includeInstallationID) => fetch(`${url}/rest/v1/rpc/charge_claim_pairing_code`, {
+      method: "POST",
+      headers: { apikey: anon, Authorization: `Bearer ${anon}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        p_code: code,
+        p_label: label,
+        ...(includeInstallationID ? { p_install_id: installationID } : {}),
+      }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  let res = await claim(true);
+  if (!res.ok) {
+    const body = await res.text();
+    // 수집기부터 배포된 경우 구버전 DB에는 세 번째 인자가 없다. 함수가 실행되지 않은
+    // PGRST202/404에만 두 인자 호출로 재시도하므로 일회용 코드를 두 번 소비하지 않는다.
+    if (res.status === 404 || body.includes("PGRST202")) {
+      res = await claim(false);
+    } else {
+      console.error(`페어링 실패 (${res.status}): ${body}`);
+      console.error("앱에서 새 코드를 발급받아 다시 시도하세요 (코드는 10분간 유효).");
+      process.exit(1);
+    }
+  }
   const token = res.ok ? await res.json() : null;
   if (!token || typeof token !== "string") {
     console.error(res.ok ? "잘못됐거나 만료된 페어링 코드입니다." : `페어링 실패 (${res.status}): ${await res.text()}`);
@@ -64,7 +189,7 @@ async function pair(code) {
   // 디바이스 토큰은 본인만 읽을 수 있게 저장 (0700/0600)
   fs.mkdirSync(CONF_DIR, { recursive: true, mode: 0o700 });
   try { fs.chmodSync(CONF_DIR, 0o700); } catch {}
-  fs.writeFileSync(CONF, JSON.stringify({ url, anon, token }, null, 2), { mode: 0o600 });
+  fs.writeFileSync(CONF, JSON.stringify({ url, anon, token, install_id: installationID }, null, 2), { mode: 0o600 });
   try { fs.chmodSync(CONF, 0o600); } catch {}
   console.log(`✓ 페어링 완료 — 이 컴퓨터가 '${label}'(으)로 등록되었습니다.`);
 }
@@ -95,7 +220,7 @@ async function unpair() {
 function installRuntime() {
   const dest = path.join(CONF_DIR, "app");
   fs.mkdirSync(dest, { recursive: true, mode: 0o700 });
-  const files = ["cli.js", "collect.js", "install.sh", "install.linux.sh", "install.ps1", "cloud.json", "package.json"];
+  const files = ["cli.js", "collect.js", "identity.js", "install.sh", "install.linux.sh", "install.ps1", "cloud.json", "package.json"];
   for (const f of files) {
     const src = path.join(__dirname, f);
     if (fs.existsSync(src)) fs.copyFileSync(src, path.join(dest, f));
@@ -157,7 +282,7 @@ async function offerCcusageInstall() {
   }
 }
 
-(async () => {
+async function main() {
   const arg = process.argv[2];
   if (!arg) {
     console.error("사용법: npx charge-connect <페어링코드>  (앱 온보딩에서 코드 발급)");
@@ -171,6 +296,9 @@ async function offerCcusageInstall() {
     await unpair();
     return;
   }
+  // 페어링 코드를 소비하기 전에 최신 버전으로 넘긴다. 새 프로세스에는 표시를 남겨
+  // 재귀 업데이트 확인 없이 곧바로 같은 코드와 옵션으로 페어링하게 한다.
+  if (await maybeUpdateBeforePairing()) return;
   // 페어링 코드로 간주: 페어링 → 스케줄 등록 → 첫 수집.
   // 스케줄을 먼저 등록한다 — 첫 수집이 실패해도(네트워크가 잠깐 끊기는 등) 자동 수집은
   // 살아 있어야 한다. 페어링 코드는 이미 소모돼서 같은 코드로 재시도할 수 없기 때문이다.
@@ -216,7 +344,21 @@ async function offerCcusageInstall() {
     return;
   }
   console.log("✓ 설정 끝! 이제 앱에서 데이터가 보입니다.");
-})().catch((e) => {
-  console.error(e.message ?? e);
-  process.exit(1);
-});
+}
+
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e.message ?? e);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  installRuntime,
+  isNewerVersion,
+  main,
+  maybeUpdateBeforePairing,
+  pair,
+  resolveLabel,
+  resolveNpmCLI,
+};

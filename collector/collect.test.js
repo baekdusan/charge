@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const C = require("./collect");
+const I = require("./identity");
 
 const futureReset = "2099-01-02T03:04:05Z";
 
@@ -17,6 +18,31 @@ test("T01 accountHash: 결정적 12자 해시, 빈 값은 null", () => {
   assert.equal(h.length, 12);
   assert.equal(h, C.accountHash("user-uuid-123"));
   assert.notEqual(h, C.accountHash("user-uuid-456"));
+});
+
+test("T01b installation id: 토큰과 독립적으로 재사용하고 깨진 파일은 복구", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "charge-device-id-"));
+  try {
+    const file = path.join(dir, "device.json");
+    const first = "123e4567-e89b-42d3-a456-426614174000";
+    const second = "123e4567-e89b-42d3-a456-426614174001";
+    assert.equal(I.resolveInstallationID(file, { randomUUID: () => first }), first);
+    assert.equal(I.resolveInstallationID(file, { randomUUID: () => second }), first);
+    fs.writeFileSync(file, "broken");
+    assert.equal(I.resolveInstallationID(file, { randomUUID: () => second }), second);
+    assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).installation_id, second);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("T01c unknown account: 같은 설치/프로바이더만 같은 격리 키", () => {
+  const a = "123e4567-e89b-42d3-a456-426614174000";
+  const b = "123e4567-e89b-42d3-a456-426614174001";
+  assert.match(I.unknownAccountKey(a, "claude"), /^unknown:[a-f0-9]{16}$/);
+  assert.equal(I.unknownAccountKey(a, "claude"), I.unknownAccountKey(a, "claude"));
+  assert.notEqual(I.unknownAccountKey(a, "claude"), I.unknownAccountKey(b, "claude"));
+  assert.notEqual(I.unknownAccountKey(a, "claude"), I.unknownAccountKey(a, "codex"));
 });
 
 test("T02 dropExpired: 리셋이 지난 창은 무효, 미래·미상은 유지", () => {
@@ -648,13 +674,16 @@ test("T14b mergeCachedProviders: 구버전 캐시엔 collected_at을 만들어 �
   assert.equal("collected_at" in p, false);
   assert.equal(JSON.stringify(p).includes("1970"), false);
   assert.equal(p.session.percent, 3);
-  // 계정 해시가 비면 캐시의 마지막 값으로 채운다
-  const filled = C.mergeCachedProviders({
+  // 계정 해시가 비어도 예전 계정이라고 추정하지 않는다. 로그인 전환 직후 프로필 조회만
+  // 실패한 경우 새 계정 값을 예전 계정 행에 덮는 것보다 기기별 미상으로 격리하는 편이 안전하다.
+  const unidentified = C.mergeCachedProviders({
     providers: [{ id: "codex", account: null, collected_at: "2026-08-02T00:00:00.000Z" }],
     cached: [{ id: "codex", account: "h1" }],
     statuses: {},
   });
-  assert.equal(filled.providers[0].account, "h1");
+  assert.equal(unidentified.providers[0].account, null);
+  const namespaced = C.namespaceUnknownAccounts(unidentified.providers, "123e4567-e89b-42d3-a456-426614174000");
+  assert.match(namespaced[0].account, /^unknown:[a-f0-9]{16}$/);
 });
 
 test("T15 collectLive: 활성 블록에 관측 시각을 붙인다 (charge_live 신선도 판정용)", async () => {

@@ -74,7 +74,7 @@ You're deep in a Claude Code session and the questions creep in: *How much of my
    npx charge-connect <pairing-code>
    ```
 
-3. That's it. This pairs the device, runs a first collection, and registers an automatic **every-5-minute** sync.
+3. That's it. Before consuming the pairing code, the CLI checks for a newer release and asks before updating. It then pairs the device, runs a first collection, and registers an automatic **every-5-minute** sync.
 
 The only requirement is [Node.js](https://nodejs.org) 18+ (macOS, Windows, or Linux). Claude credentials are read automatically: from the Keychain on macOS, `~/.claude/.credentials.json` on Windows/Linux. Optionally `npm i -g ccusage` for faster collection.
 

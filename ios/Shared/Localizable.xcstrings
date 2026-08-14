@@ -1428,6 +1428,26 @@
         }
       }
     },
+    "Unidentified account" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "확인되지 않은 계정"
+          }
+        }
+      }
+    },
+    "Unnamed device" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이름 없는 기기"
+          }
+        }
+      }
+    },
     "Unpair" : {
       "extractionState" : "stale",
       "localizations" : {

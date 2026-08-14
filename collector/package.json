@@ -1,16 +1,17 @@
 {
   "name": "charge-connect",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Connects your computer to the Charge iPhone app and uploads AI coding usage",
   "bin": {
     "charge-connect": "cli.js"
   },
   "scripts": {
-    "test": "node --test collect.test.js"
+    "test": "node --test collect.test.js cli.test.js"
   },
   "files": [
     "cli.js",
     "collect.js",
+    "identity.js",
     "install.sh",
     "install.linux.sh",
     "install.ps1",

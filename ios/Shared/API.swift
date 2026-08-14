@@ -5,6 +5,7 @@ struct UsagePayload: Codable {
     let generatedAt: String?
     let daily: [DailyUsage]
     let live: ActiveBlock?
+    var liveBlocks: [DeviceActiveBlock]? = nil
     let providers: [Provider]?
     let devices: [CollectorDevice]?
 }
@@ -118,6 +119,7 @@ enum ChargeAPI {
     /// collected_at(수집기가 실제로 블록을 읽은 시각)은 select=*로 함께 온다, 컬럼명을 나열하면
     /// 서버 마이그레이션이 배포보다 늦은 순간에 조회 전체가 400으로 죽는다.
     private struct AccountLiveRow: Codable {
+        let deviceId: String
         let activeBlock: ActiveBlock?
         let updatedAt: String?
         var collectedAt: String? = nil
@@ -135,6 +137,17 @@ enum ChargeAPI {
         }
 
         var updatedDate: Date? { Self.parse(updatedAt) }
+    }
+
+    /// 새 백엔드는 기기별 원본 관측을 보존한다. payload는 수집기가 보낸 Provider 한 건이며
+    /// 바깥 키들은 어느 기기가 언제 그 값을 보고했는지 나타낸다.
+    private struct ProviderObservationRow: Codable {
+        let deviceId: String
+        let providerId: String
+        let account: String
+        let payload: Provider
+        let collectedAt: String?
+        let lastReportedAt: String
     }
 
     static func fetchAll() async throws -> UsagePayload {
@@ -166,6 +179,13 @@ enum ChargeAPI {
         async let daily: [DailyUsage] = get(cloud.url, cloud.anon, "charge_daily?select=*&order=period.asc&period=gte.\(since)", bearer: jwt)
         async let liveRows: [AccountLiveRow] = get(cloud.url, cloud.anon, "charge_live?select=*&order=updated_at.desc", bearer: jwt)
         async let providerRows: [Provider] = get(cloud.url, cloud.anon, "charge_providers?select=*&order=id.asc", bearer: jwt)
+        // 앱이 먼저 배포돼도 구버전 DB의 404 때문에 전체 로드가 죽지 않게 optional 조회한다.
+        async let observationRows: [ProviderObservationRow]? = optionalGet(
+            cloud.url,
+            cloud.anon,
+            "charge_provider_observations?select=*&order=provider_id.asc,last_reported_at.desc",
+            bearer: jwt
+        )
         async let deviceRows: [CollectorDevice] = get(
             cloud.url,
             cloud.anon,
@@ -177,22 +197,133 @@ enum ChargeAPI {
         // 수집이 깨진 기기가 캐시된 옛 블록을 5분마다 재업로드하면 updated_at 기준으로는
         // 그 낡은 블록이 계속 이겨 최대 5시간 동안 live 게이지를 차지한다.
         let lives = try await liveRows
-        let selectedLive = lives
+        let activeLives = lives
             .filter { $0.activeBlock.map { !$0.isExpired } ?? false }
-            .max { a, b in
+            .sorted { a, b in
                 let sa = a.activeBlock?.start ?? .distantPast
                 let sb = b.activeBlock?.start ?? .distantPast
-                if sa != sb { return sa < sb }
-                return (a.updatedDate ?? .distantPast) < (b.updatedDate ?? .distantPast)
+                if sa != sb { return sa > sb }
+                return (a.updatedDate ?? .distantPast) > (b.updatedDate ?? .distantPast)
             }
+        let selectedLive = activeLives.first
+        let devices = try await deviceRows
+        let canonicalProviders = try await providerRows
+        let observations = await observationRows
+        let labels = deviceLabelsByID(devices)
         return UsagePayload(
             // 표시 중인 블록을 올린 행의 시각, lives.first는 선택된 블록과 무관한 다른 기기일 수 있다
             generatedAt: selectedLive?.collectedAt ?? selectedLive?.updatedAt ?? lives.first?.updatedAt,
             daily: mergeDaily(try await daily),
             live: selectedLive?.activeBlock,
-            providers: try await providerRows,
-            devices: try await deviceRows
+            liveBlocks: activeLives.compactMap { row in
+                guard let block = row.activeBlock else { return nil }
+                return DeviceActiveBlock(
+                    deviceId: row.deviceId,
+                    deviceLabel: labels[row.deviceId],
+                    block: block,
+                    collectedAt: row.collectedAt ?? row.updatedAt
+                )
+            },
+            providers: observations.map {
+                mergeProviderObservations($0, canonical: canonicalProviders, devices: devices)
+            } ?? canonicalProviders,
+            devices: devices
         )
+    }
+
+    /// 같은 (provider, account)의 기기별 관측 중 실제 수집 시각이 가장 신선한 값을 카드로 삼는다.
+    /// 아직 관측 테이블로 이행되지 않은 canonical 행도 합쳐, 오프라인 기기 데이터가 배포 순간
+    /// 사라지지 않게 한다.
+    private static func mergeProviderObservations(
+        _ observations: [ProviderObservationRow],
+        canonical: [Provider],
+        devices: [CollectorDevice],
+        now: Date = Date()
+    ) -> [Provider] {
+        let deviceByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
+        let displayLabelByID = deviceLabelsByID(devices)
+        let isoFrac: ISO8601DateFormatter = {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return f
+        }()
+        let iso = ISO8601DateFormatter()
+        func date(_ value: String?) -> Date? {
+            guard let value else { return nil }
+            return isoFrac.date(from: value) ?? iso.date(from: value)
+        }
+        func key(_ provider: String, _ account: String?) -> String {
+            "\(provider)\u{0}\(account ?? "")"
+        }
+        func isRetired(_ row: ProviderObservationRow) -> Bool {
+            guard let device = deviceByID[row.deviceId], device.isTracking(at: now),
+                  let reported = date(row.lastReportedAt), now.timeIntervalSince(reported) > 20 * 60,
+                  let statuses = device.collectStatus else { return false }
+            // 이 프로바이더 자체가 실패 중이면 마지막 정상 관측을 보존한다. 정상/낡음 또는
+            // 최신 수집기에서 항목 자체가 사라진 경우에만 이 기기의 옛 계정 관측을 은퇴시킨다.
+            guard let status = statuses[row.providerId] else { return true }
+            return !status.hasPrefix("error") && !status.hasPrefix("auth_expired")
+        }
+
+        let grouped = Dictionary(grouping: observations) { key($0.providerId, $0.account) }
+        let canonicalByKey = Dictionary(uniqueKeysWithValues: canonical.map { (key($0.id, $0.account), $0) })
+        var resolved: [Provider] = []
+        var observationKeys = Set<String>()
+        for (groupKey, rows) in grouped {
+            observationKeys.insert(groupKey)
+            let active = rows.filter { !isRetired($0) }
+            guard let newest = active.max(by: { a, b in
+                let da = date(a.collectedAt) ?? date(a.lastReportedAt) ?? .distantPast
+                let db = date(b.collectedAt) ?? date(b.lastReportedAt) ?? .distantPast
+                return da < db
+            }) else { continue }
+            let observedDate = date(newest.collectedAt) ?? date(newest.lastReportedAt) ?? .distantPast
+            // 순차 배포 중에는 아직 구버전 수집기만 canonical을 갱신할 수 있다. 그 값이 더
+            // 신선하면 관측 테이블에 이미 키가 있다는 이유만으로 버리지 않는다.
+            let canonicalCandidate = canonicalByKey[groupKey]
+            let useCanonical = canonicalCandidate
+                .flatMap { date($0.collectedAt) }
+                .map { $0 > observedDate } ?? false
+            let base = useCanonical ? canonicalCandidate! : newest.payload
+            let sourceDeviceID = useCanonical ? canonicalCandidate?.deviceId : newest.deviceId
+            var labels = active.compactMap { displayLabelByID[$0.deviceId] }
+            if let sourceDeviceID, let label = displayLabelByID[sourceDeviceID], !labels.contains(label) {
+                labels.append(label)
+            }
+            labels.sort()
+            resolved.append(Provider(
+                id: base.id,
+                name: base.name,
+                plan: base.plan,
+                session: base.session,
+                weekly: base.weekly,
+                extras: base.extras,
+                status: base.status,
+                account: base.account ?? newest.account,
+                deviceId: sourceDeviceID,
+                deviceLabel: sourceDeviceID.flatMap { displayLabelByID[$0] },
+                deviceLabels: labels,
+                collectedAt: base.collectedAt ?? newest.collectedAt
+            ))
+        }
+        // 관측이 한 번도 생성되지 않은 키는 구버전/장기 오프라인 기기일 수 있으므로 보존한다.
+        resolved.append(contentsOf: canonical.filter { !observationKeys.contains(key($0.id, $0.account)) })
+        return resolved.sorted { ($0.id, $0.account ?? "") < ($1.id, $1.account ?? "") }
+    }
+
+    /// 호스트명이 같은 별도 설치도 화면에서 구분할 수 있게, 중복 라벨에만 짧은 기기 id를 붙인다.
+    private static func deviceLabelsByID(_ devices: [CollectorDevice]) -> [String: String] {
+        let baseByID = Dictionary(uniqueKeysWithValues: devices.map { device in
+            (device.id, device.shortLabel ?? device.label ?? String(localized: "Unnamed device"))
+        })
+        let counts = Dictionary(grouping: baseByID.values, by: { $0 }).mapValues(\.count)
+        return Dictionary(uniqueKeysWithValues: devices.map { device in
+            let base = baseByID[device.id]!
+            let label = counts[base, default: 0] > 1
+                ? "\(base) · \(device.id.prefix(4).uppercased())"
+                : base
+            return (device.id, label)
+        })
     }
 
     /// 머신(디바이스)별 행을 날짜 기준으로 합산 — 여러 컴퓨터에서 수집해도 비용이 합쳐져 보인다
@@ -260,5 +391,14 @@ enum ChargeAPI {
             throw URLError(.badServerResponse)
         }
         return try decoder.decode(T.self, from: data)
+    }
+
+    private static func optionalGet<T: Decodable>(
+        _ base: URL,
+        _ key: String,
+        _ pathQuery: String,
+        bearer: String? = nil
+    ) async -> T? {
+        try? await get(base, key, pathQuery, bearer: bearer)
     }
 }

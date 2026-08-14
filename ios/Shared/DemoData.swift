@@ -89,6 +89,12 @@ enum DemoData {
             generatedAt: at(-90),
             daily: dailyHistory(now: now),
             live: live,
+            liveBlocks: [DeviceActiveBlock(
+                deviceId: device.id,
+                deviceLabel: device.shortLabel,
+                block: live,
+                collectedAt: at(-90)
+            )],
             providers: [claude, codex, gemini],
             devices: [device]
         )

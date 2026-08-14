@@ -15,6 +15,7 @@ create table if not exists public.charge_devices (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   token_hash text not null unique,   -- sha256(토큰) — 원문은 저장하지 않는다
+  installation_id text,              -- 수집기 설치 UUID — label(표시 이름)과 분리한 안정적인 기기 식별자
   label text,
   created_at timestamptz not null default now(),
   last_seen_at timestamptz,
@@ -23,6 +24,9 @@ create table if not exists public.charge_devices (
 
 -- 기존 DB 마이그레이션 (create table if not exists는 기존 테이블에 컬럼을 더하지 않는다)
 alter table public.charge_devices add column if not exists collect_status jsonb;
+alter table public.charge_devices add column if not exists installation_id text;
+create unique index if not exists charge_devices_user_installation_id_key
+  on public.charge_devices (user_id, installation_id) where installation_id is not null;
 
 -- MARK: 데이터 테이블
 -- daily/live는 디바이스(머신)별 행 — 여러 컴퓨터가 서로 덮어쓰지 않고, 앱이 날짜별로 합산해 표시한다.
@@ -68,7 +72,7 @@ create table if not exists public.charge_providers (
   weekly jsonb,
   extras jsonb,
   status jsonb,
-  device_id uuid references public.charge_devices(id) on delete cascade,  -- 마지막 보고 머신 (계정 전환·기기 삭제 시 유령 카드 정리용)
+  device_id uuid references public.charge_devices(id) on delete set null, -- 호환용 정본 행의 마지막 보고 머신
   device_label text,                 -- 이 계정을 마지막으로 보고한 머신 이름 (계정이 여럿일 때 앱에 표시)
   collected_at timestamptz,          -- 소스에서 실제로 수집된 시각 (null = collected_at 도입 전 수집기가 쓴 행)
   updated_at timestamptz not null default now(),
@@ -77,6 +81,53 @@ create table if not exists public.charge_providers (
 
 -- 기존 DB 마이그레이션
 alter table public.charge_providers add column if not exists collected_at timestamptz;
+
+-- 기존 charge_providers의 CASCADE 제약을 SET NULL로 이행한다. 같은 계정을 여러 기기가
+-- 보고할 때 마지막 보고 기기를 지웠다는 이유로 공유 카드까지 사라지면 안 된다.
+alter table public.charge_providers drop constraint if exists charge_providers_device_id_fkey;
+alter table public.charge_providers add constraint charge_providers_device_id_fkey
+  foreign key (device_id) references public.charge_devices(id) on delete set null;
+
+-- 기기별 원본 관측. charge_providers는 구버전 앱 호환용 계정 정본을 계속 제공하지만,
+-- 새 구조는 각 기기의 관측을 먼저 보존한 뒤 읽을 때 계정별 최신값을 고른다.
+-- payload는 검증된 p_providers 항목 하나이며 행 수는 기기×프로바이더×계정으로 제한된다.
+create table if not exists public.charge_provider_observations (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  device_id uuid not null references public.charge_devices(id) on delete cascade,
+  provider_id text not null,
+  account text not null,
+  payload jsonb not null,
+  collected_at timestamptz,
+  last_reported_at timestamptz not null default now(),
+  primary key (user_id, device_id, provider_id, account)
+);
+
+-- 기기 삭제 cascade로 마지막 관측이 사라질 때만 호환용 canonical도 정리한다.
+-- 같은 계정의 다른 기기 관측이 하나라도 있으면 canonical은 유지되어 구버전 앱도 끊기지 않는다.
+create or replace function public.charge_cleanup_provider_observation()
+returns trigger
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from charge_provider_observations o
+    where o.user_id = old.user_id
+      and o.provider_id = old.provider_id
+      and o.account = old.account
+  ) then
+    delete from charge_providers p
+    where p.user_id = old.user_id
+      and p.id = old.provider_id
+      and p.account = old.account
+      and (p.device_id is null or p.device_id = old.device_id);
+  end if;
+  return null;
+end $$;
+
+drop trigger if exists charge_cleanup_provider_observation on public.charge_provider_observations;
+create trigger charge_cleanup_provider_observation
+after delete on public.charge_provider_observations
+for each row execute function public.charge_cleanup_provider_observation();
 
 create table if not exists public.charge_pairing_codes (
   code text primary key,
@@ -102,6 +153,7 @@ alter table public.charge_claim_failures enable row level security;
 alter table public.charge_daily enable row level security;
 alter table public.charge_live enable row level security;
 alter table public.charge_providers enable row level security;
+alter table public.charge_provider_observations enable row level security;
 alter table public.charge_devices enable row level security;
 alter table public.charge_pairing_codes enable row level security;
 
@@ -115,6 +167,10 @@ create policy "own read" on public.charge_live
 
 drop policy if exists "own read" on public.charge_providers;
 create policy "own read" on public.charge_providers
+  for select to authenticated using (user_id = auth.uid());
+
+drop policy if exists "own read" on public.charge_provider_observations;
+create policy "own read" on public.charge_provider_observations
   for select to authenticated using (user_id = auth.uid());
 
 drop policy if exists "own read" on public.charge_devices;
@@ -162,7 +218,13 @@ end $$;
 
 -- 수집기(anon)가 호출: 코드를 소비하고 디바이스 토큰 발급.
 -- 실패 시 예외 대신 null 반환 — 예외를 던지면 실패 카운터 기록까지 롤백되기 때문.
-create or replace function public.charge_claim_pairing_code(p_code text, p_label text default null)
+-- 구버전 두 인자 함수를 남겨두면 PostgREST가 기본 인자 함수와 구분하지 못하므로 먼저 제거한다.
+drop function if exists public.charge_claim_pairing_code(text, text);
+create or replace function public.charge_claim_pairing_code(
+  p_code text,
+  p_label text default null,
+  p_install_id text default null
+)
 returns text
 language plpgsql security definer set search_path = public, extensions
 as $$
@@ -176,6 +238,11 @@ declare
 begin
   -- 기기 이름은 앱 목록에 그대로 표시되므로 길이를 제한한다 (실명·과도한 문자열 방어)
   p_label := left(trim(p_label), 64);
+  p_install_id := nullif(lower(trim(p_install_id)), '');
+  if p_install_id is not null
+     and p_install_id !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then
+    raise exception 'invalid installation id';
+  end if;
   -- 무차별 대입 방지: 호출자(IP)별로 최근 10분 실패 20회 초과 시 차단
   -- x-forwarded-for의 마지막 항목 = 게이트웨이가 덧붙인 실제 클라이언트 IP (앞쪽은 위조 가능)
   v_source := coalesce(current_setting('request.headers', true)::jsonb ->> 'x-forwarded-for', 'unknown');
@@ -203,18 +270,34 @@ begin
   end if;
 
   tok := encode(gen_random_bytes(32), 'hex');
-  -- 같은 머신(호스트명)이 다시 페어링하면 새 디바이스를 만들지 않고 토큰만 교체한다
-  -- (재설치 후 같은 60일 기록이 새 디바이스로 중복 합산되는 것 방지)
-  select id into v_dev from charge_devices
-  where user_id = v_uid and label is not distinct from p_label
-  order by created_at asc limit 1;
+  -- 신버전은 설치 UUID로만 같은 기기를 판정한다. 이름이 같은 별도 PC나 같은 PC의
+  -- 다른 OS 사용자가 서로의 토큰을 폐기하면 안 된다. 첫 이행 때만 UUID가 없는 동일 라벨
+  -- 레거시 행을 한 번 승계해 기존 60일 기록의 중복 합산을 막는다.
+  if p_install_id is not null then
+    select id into v_dev from charge_devices
+    where user_id = v_uid and installation_id = p_install_id
+    order by created_at asc limit 1;
+    if v_dev is null then
+      select id into v_dev from charge_devices
+      where user_id = v_uid and installation_id is null and label is not distinct from p_label
+      order by created_at asc limit 1;
+    end if;
+  else
+    -- 구버전 수집기는 설치 UUID가 없으므로 종전의 라벨 승계 동작을 유지한다.
+    select id into v_dev from charge_devices
+    where user_id = v_uid and label is not distinct from p_label
+    order by created_at asc limit 1;
+  end if;
   if v_dev is not null then
     update charge_devices
-       set token_hash = encode(digest(tok, 'sha256'), 'hex'), last_seen_at = null
+       set token_hash = encode(digest(tok, 'sha256'), 'hex'),
+           installation_id = coalesce(p_install_id, installation_id),
+           label = p_label,
+           last_seen_at = null
      where id = v_dev;
   else
-    insert into charge_devices (user_id, token_hash, label)
-    values (v_uid, encode(digest(tok, 'sha256'), 'hex'), p_label);
+    insert into charge_devices (user_id, token_hash, installation_id, label)
+    values (v_uid, encode(digest(tok, 'sha256'), 'hex'), p_install_id, p_label);
   end if;
   return tok;
 end $$;
@@ -434,6 +517,46 @@ begin
       and exists (select 1 from jsonb_array_elements(p_providers) p where p->>'id' = cp.id);
   end if;
 
+  -- 기기별 관측을 canonical charge_providers로 접기 전에 독립 보존한다. 같은 계정을
+  -- 여러 기기가 보고해도 행을 공유하지 않으므로 한 기기 삭제/계정 전환이 다른 관측을
+  -- 지우지 않는다. 더 오래된 캐시가 오면 내용은 지키되 last_reported_at은 갱신해
+  -- "이 기기가 아직 이 계정 키를 보고 중"이라는 사실은 남긴다.
+  -- 설치 UUID 수집기로 이행하면서 account=''가 기기별 unknown:* 키로 바뀌면, 같은
+  -- 기기의 레거시 미상 관측은 즉시 치워 일시적으로 카드가 둘 생기지 않게 한다.
+  delete from charge_provider_observations cpo
+  where cpo.user_id = v_user and cpo.device_id = v_device and cpo.account = ''
+    and exists (
+      select 1 from jsonb_array_elements(p_providers) p
+      where p->>'id' = cpo.provider_id and coalesce(p->>'account', '') <> ''
+    );
+
+  insert into charge_provider_observations as cpo
+    (user_id, device_id, provider_id, account, payload, collected_at, last_reported_at)
+  select distinct on (p->>'id', coalesce(p->>'account', ''))
+         v_user, v_device, p->>'id', coalesce(p->>'account', ''),
+         p || jsonb_build_object('account', coalesce(p->>'account', '')),
+         charge_stamp(p->>'collected_at'), now()
+  from jsonb_array_elements(p_providers) p
+  order by p->>'id', coalesce(p->>'account', ''), charge_stamp(p->>'collected_at') desc nulls last
+  on conflict (user_id, device_id, provider_id, account) do update set
+    payload = case
+      when excluded.collected_at is not null
+           and (cpo.collected_at is null or excluded.collected_at >= cpo.collected_at)
+        then excluded.payload
+      when excluded.collected_at is null and cpo.collected_at is null
+        then excluded.payload
+      else cpo.payload
+    end,
+    collected_at = case
+      when excluded.collected_at is not null
+           and (cpo.collected_at is null or excluded.collected_at >= cpo.collected_at)
+        then excluded.collected_at
+      when excluded.collected_at is null and cpo.collected_at is null
+        then null
+      else cpo.collected_at
+    end,
+    last_reported_at = now();
+
   -- 신선도 가드: providers는 (user_id, id, account) 한 행을 여러 기기가 공유하므로 여기가 진짜
   -- 경쟁 지점이다. 토큰 만료 기기가 캐시 폴백(레이트리밋 창 드롭된 값)을 5분마다 올려 건강한 기기가
   -- 쓴 행을 덮는 것을 막는다. WHERE가 거짓이면 기존 행이 통째로 유지된다(아래 3분기 규칙).
@@ -450,9 +573,8 @@ begin
     name = excluded.name,
     plan = excluded.plan,
     status = excluded.status,
-    -- device_id는 보존하지 않고 언제나 실제 마지막 기록자로 갱신한다. charge_providers.device_id는
-    -- ON DELETE CASCADE라, 더 이상 쓰지 않는 기기를 계속 가리키게 두면 그 기기를 unpair하는 순간
-    -- 여러 기기가 공유하던 카드가 통째로 사라진다.
+    -- device_id는 보존하지 않고 언제나 실제 마지막 기록자로 갱신한다. 이 값은 구버전 앱을 위한
+    -- canonical 출처 표시이며, FK는 SET NULL이라 마지막 기록 기기를 지워도 공유 카드는 유지된다.
     device_id = excluded.device_id,
     -- 레이트리밋 창이 비어 있는 업로드(만료 토큰 기기의 캐시 폴백)는 아직 리셋 전인 창을 지우지 못한다.
     -- 리셋 시각이 지나면 조건이 풀려 정상적으로 비워지니 유령 게이지는 생기지 않는다.
@@ -522,14 +644,15 @@ end $$;
 revoke execute on function public.charge_create_pairing_code() from public;
 grant execute on function public.charge_create_pairing_code() to authenticated;
 
-revoke execute on function public.charge_claim_pairing_code(text, text) from public;
-grant execute on function public.charge_claim_pairing_code(text, text) to anon, authenticated;
+revoke execute on function public.charge_claim_pairing_code(text, text, text) from public;
+grant execute on function public.charge_claim_pairing_code(text, text, text) to anon, authenticated;
 
 -- charge_safe_ts, charge_stamp는 내부 헬퍼, RPC로 노출할 이유가 없다 (charge_upload는 security definer라 소유자 권한으로 호출 가능)
 revoke execute on function public.charge_safe_ts(text) from public;
 revoke execute on function public.charge_stamp(text) from public;
 revoke execute on function public.charge_num(text) from public;
 revoke execute on function public.charge_safe_date(text) from public;
+revoke execute on function public.charge_cleanup_provider_observation() from public;
 
 revoke execute on function public.charge_upload(text, jsonb, jsonb, jsonb, jsonb) from public;
 grant execute on function public.charge_upload(text, jsonb, jsonb, jsonb, jsonb) to anon, authenticated;

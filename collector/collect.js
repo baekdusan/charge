@@ -7,6 +7,7 @@ const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const fs = require("node:fs");
 const path = require("node:path");
+const { unknownAccountKey } = require("./identity.js");
 
 const execFileAsync = promisify(execFile);
 
@@ -844,18 +845,27 @@ function mergeCachedProviders({ providers, cached = [], codexBarComplete = false
     // 정상 수집이 남긴 판정(auth_expired/error 등)은 덮지 않는다.
     if (nextStatuses && !nextStatuses[sanitized.id]) nextStatuses[sanitized.id] = "stale";
   }
-  // 계정 식별 실패 시 마지막으로 알려진 계정 해시 유지 (계정 미상('')과 실제 계정 행이 갈라지는 것 방지)
-  for (const p of merged) {
-    if (!p.account) p.account = cached.find((c) => c.id === p.id)?.account ?? null;
-  }
-  // dedupe는 account 보정 뒤에, 보정으로 비로소 같은 키가 되는 경우가 있다
   return { providers: dedupeProviders(merged), statuses: nextStatuses };
+}
+
+function namespaceUnknownAccounts(providers, installationID) {
+  if (!installationID) return providers;
+  // 프로필 조회 실패 직전에 사용자가 계정을 바꿨을 수 있으므로 캐시의 예전 account를
+  // 추정해 붙이지 않는다. 확인되지 않은 값은 이 기기 전용 키로 보낸 뒤 서버에서 격리한다.
+  return dedupeProviders(providers.map((p) => p.account
+    ? p
+    : { ...p, account: unknownAccountKey(installationID, p.id) }));
 }
 
 // 업로드 설정 — 우선순위: CHARGE_* 환경변수(테스트용) → ~/.charge/config.json(페어링)
 function resolveMode() {
   if (process.env.CHARGE_TOKEN && process.env.CHARGE_URL && process.env.CHARGE_ANON) {
-    return { url: process.env.CHARGE_URL, anon: process.env.CHARGE_ANON, token: process.env.CHARGE_TOKEN };
+    return {
+      url: process.env.CHARGE_URL,
+      anon: process.env.CHARGE_ANON,
+      token: process.env.CHARGE_TOKEN,
+      install_id: process.env.CHARGE_INSTALL_ID ?? null,
+    };
   }
   const conf = path.join(process.env.CHARGE_HOME ?? path.join(HOME, ".charge"), "config.json");
   try {
@@ -949,13 +959,15 @@ async function main() {
     statuses: providerCollection.statuses,
   }));
 
+  const mode = resolveMode();
+  providers = namespaceUnknownAccounts(providers, mode?.install_id);
+
   if (DRY_RUN) {
     console.log(JSON.stringify({ daily: daily.slice(-1), live, providers, collect_status: statuses }, null, 2));
     console.log(`\n[dry-run] daily ${daily.length}행 + live + providers ${providers.length}개 업로드 예정`);
     return;
   }
 
-  const mode = resolveMode();
   if (!mode) {
     console.error("페어링이 안 돼 있습니다. 앱에서 코드를 발급받아 `npx charge-connect <코드>`를 실행하세요.");
     process.exit(1);
@@ -991,6 +1003,7 @@ module.exports = {
   fetchOnceRetried,
   freshestCredentials,
   mergeCachedProviders,
+  namespaceUnknownAccounts,
   normalizeRateWindow,
   normalizeResetAt,
   pairedUpload,
