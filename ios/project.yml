@@ -23,6 +23,10 @@ targets:
       path: Charge/Info.plist
       properties:
         CFBundleDisplayName: Charge
+        # xcodegen은 Info.plist를 매번 새로 쓰며 기본값이 1.0 / 1 하드코딩이라,
+        # 빌드 설정(MARKETING_VERSION, Xcode Cloud 빌드 번호)을 따라가도록 명시한다
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         # 런치스크린을 앱 배경(#111214)과 맞춰 흰 화면 번쩍임 제거
         UILaunchScreen:
           UIColorName: LaunchBackground
@@ -70,6 +74,8 @@ targets:
       path: ChargeWidget/Info.plist
       properties:
         CFBundleDisplayName: Charge Widget
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
