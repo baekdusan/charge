@@ -126,7 +126,18 @@ Charge is built to see as little as possible:
 
 Pair each machine with its own code (Settings → *Pair another computer*). Daily cost/tokens are stored **per machine and summed by date** in the app: $40 on your MacBook and $10 on your Mac mini shows as $50, and one machine going offline never erases the other's history.
 
-Rate limits and plans are account-level, and every upload carries a **collection timestamp**. The server keeps only the freshest data per account, so an idle machine with an expired login can never overwrite the live gauges reported by the machine you're actually working on. If a machine keeps uploading but a provider's collection is failing (say, an expired Claude session), the app flags that machine with a yellow dot and tells you which provider needs a re-login.
+Rate limits and plans are account-level, and every upload carries a **collection timestamp**. The server keeps only the freshest data per account, so an idle machine with an expired login can never overwrite the live gauges reported by the machine you're actually working on. If a provider fails, Charge shows that it is retrying. After **at least 5 consecutive collection attempts over at least 20 minutes**, it offers guidance specific to the error. Successful collection or a gap longer than 12 minutes resets the streak; refreshing the iPhone app does not count as another attempt. This requires the updated app and collector.
+
+You can hide an unused provider from the recovery card or Settings. This hides its cards, warnings, and reset notifications across the app and widgets, including warnings from other paired computers. Desktop collection and historical cost totals continue. Turn the provider back on in Settings to restore it. Charge does not infer subscription cancellation from a failed request.
+
+### Claude Code doesn't appear
+
+- Open **Claude Code on the computer where Charge is paired**, and check `/status` and `/login`. Signing in to the Claude website or desktop chat alone does not provide the collector with a Claude Code login. API-key accounts do not provide subscription-limit gauges.
+- If you use `CLAUDE_CONFIG_DIR` or `CLAUDE_SECURESTORAGE_CONFIG_DIR`, pair Charge from the same environment. Charge saves these location settings locally for scheduled collection and reads the matching credential file or macOS Keychain entry. It does not fall back to a different account's default store.
+- A missing or unreadable subscription login now produces setup guidance even before the first usage card exists. An HTTP `401` indicates authentication failure; `403` means access was denied; `429` means the usage request was rate limited. These responses do not establish whether a subscription was cancelled.
+- For Windows users running Claude Code inside WSL, pair Charge **inside that WSL environment**, where the Claude credentials and logs are stored.
+
+See [Claude Code authentication](https://code.claude.com/docs/en/authentication). Persistent usage-endpoint `429` responses have also been [reported by Max subscribers](https://github.com/anthropics/claude-code/issues/30930); a review saying “not detected” needs the user's OS, login method, and collector log to identify its specific cause.
 
 ## 🛠️ Building from source
 

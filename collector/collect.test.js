@@ -341,9 +341,105 @@ test("T09d claudeProvider: 401→auth_expired, 5xx→error, 성공→ok+collecte
   const missing = await C.claudeProvider({
     fetchFn: failWith(200),
     loadCredentials: async () => { throw new Error("no credentials"); },
+    hasClaude: () => false,
   });
   assert.equal(missing.provider, null);
   assert.equal(missing.status, null);
+});
+
+test("Claude detection distinguishes missing login, absent tools, 403 and 429", async () => {
+  const detected = await C.claudeProvider({
+    hasClaude: () => true,
+    loadCredentials: async () => { throw new Error("keychain unavailable"); },
+    fetchFn: async () => { throw new Error("must not query without credentials"); },
+  });
+  assert.deepEqual(detected, { provider: null, status: "error:credentials_missing" });
+  for (const [code, expected] of [[403, "error:access_denied"], [429, "error:rate_limited"]]) {
+    const result = await C.claudeProvider({
+      loadCredentials: async () => ({ claudeAiOauth: { accessToken: "test-token" } }),
+      fetchFn: async () => ({ ok: false, status: code }),
+    });
+    assert.equal(result.status, expected);
+  }
+});
+
+test("Claude credentials follow the selected store and never fall back to another account", async () => {
+  const home = path.join(os.tmpdir(), "charge-claude-home");
+  const custom = path.join(home, "work");
+  const env = { CLAUDE_CONFIG_DIR: custom };
+  const location = C.claudeCredentialLocation(env, home);
+  assert.equal(location.file, path.join(custom, ".credentials.json"));
+  assert.match(location.service, /^Claude Code-credentials-[a-f0-9]{8}$/);
+  const requested = [];
+  const creds = await C.claudeCredentials({ env, home,
+    run: async (_cmd, args) => {
+      requested.push(args[2]);
+      return JSON.stringify({ claudeAiOauth: { expiresAt: 999999 } }); // unusable, though newer
+    },
+    read: (file) => {
+      assert.equal(file, location.file);
+      return JSON.stringify({ claudeAiOauth: { accessToken: "work", expiresAt: 1000 } });
+    },
+  });
+  assert.equal(creds.claudeAiOauth.accessToken, "work");
+  assert.deepEqual(requested, [location.service]);
+  const pinned = C.claudeCredentialLocation({ ...env, CLAUDE_SECURESTORAGE_CONFIG_DIR: "" }, home);
+  assert.equal(pinned.service, "Claude Code-credentials");
+  assert.equal(pinned.file, path.join(home, ".claude", ".credentials.json"));
+  assert.equal(pinned.configDir, custom);
+  const independent = C.claudeCredentialLocation({ ...env, CLAUDE_SECURESTORAGE_CONFIG_DIR: custom + "-login" }, home);
+  assert.notEqual(independent.service, location.service);
+  assert.equal(independent.file, path.join(custom + "-login", ".credentials.json"));
+  assert.equal(
+    C.claudeCredentialLocation({ CLAUDE_CONFIG_DIR: "cafe\u0301" }, home).service,
+    C.claudeCredentialLocation({ CLAUDE_CONFIG_DIR: "caf\u00e9" }, home).service
+  );
+  await assert.rejects(C.claudeCredentials({ env, home,
+    run: async () => { throw new Error("not found"); },
+    read: () => { throw new Error("not found"); },
+  }), /로그인/);
+});
+
+test("Collection health persists real attempts and resets on recovery, gaps and pairing changes", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "charge-health-"));
+  const file = path.join(dir, "health.json");
+  const start = Date.parse("2026-09-14T00:00:00Z");
+  const record = (statuses, minutes, extra = {}) => C.recordCollectionHealth(statuses,
+    { file, scope: "device-a", now: start + minutes * 60_000, ...extra });
+  try {
+    for (let i = 0; i < 5; i++) {
+      const status = i % 2 ? "auth_expired" : "error:rate_limited";
+      const result = record({ claude: status, codex: "ok" }, i * 5);
+      assert.equal(result.claude, `${status};failures=${i + 1};since=${start / 1000}`);
+      assert.equal(result.codex, "ok");
+    }
+    const before = fs.readFileSync(file, "utf8");
+    record({ claude: "error" }, 25, { persist: false });
+    assert.equal(fs.readFileSync(file, "utf8"), before, "dry-run must not count attempts");
+    assert.equal(record({ claude: "error" }, 25).claude, `error;failures=6;since=${start / 1000}`);
+    assert.deepEqual(record({ claude: "ok" }, 30), { claude: "ok" });
+    assert.equal(record({ claude: "error" }, 35).claude, `error;failures=1;since=${start / 1000 + 35 * 60}`);
+    assert.equal(record({ claude: "error" }, 60).claude, `error;failures=1;since=${start / 1000 + 60 * 60}`);
+    assert.equal(record({ claude: "error" }, 65, { scope: "device-b" }).claude,
+      `error;failures=1;since=${start / 1000 + 65 * 60}`);
+    fs.writeFileSync(file, "corrupt");
+    assert.match(record({ claude: "error" }, 70).claude, /failures=1;/);
+    assert.equal(record(null, 75), null);
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).failures, {});
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Collection health does not carry failed streaks through stale, missing or invalid observations", () => {
+  const now = Date.now();
+  const previous = { claude: { count: 4, since: now - 20 * 60_000, lastAttempt: now - 5 * 60_000 } };
+  for (const statuses of [{ claude: "stale" }, {}, null]) {
+    assert.deepEqual(C.advanceCollectionHealth(statuses, previous, now).failures, {});
+  }
+  for (const bad of [null, { count: -1 }, { ...previous.claude, lastAttempt: now + 60_000 }]) {
+    assert.match(C.advanceCollectionHealth({ claude: "error" }, { claude: bad }, now).statuses.claude, /failures=1;/);
+  }
 });
 
 test("T09e freshestCredentials: expiresAt이 더 나중인 소스를 고른다 (SSH 세션이 파일에만 토큰을 갱신하는 경우)", () => {

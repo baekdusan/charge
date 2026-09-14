@@ -78,12 +78,29 @@ enum DemoData {
             projection: ActiveBlock.Projection(remainingMinutes: 192, totalCost: 17.85)
         )
 
-        let device = CollectorDevice(
+        var device = CollectorDevice(
             id: "demo-device",
             label: "Demo-MacBookPro.local",
             lastSeenAt: at(-90),
             collectStatus: ["claude": "ok", "codex": "ok", "gemini": "ok"]
         )
+        // Deterministic recovery fixtures, scoped to demo mode and this process.
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "-charge-demo-collection-failures"),
+           args.indices.contains(i + 1), let count = Int(args[i + 1]), count > 0 {
+            let reasonIndex = args.firstIndex(of: "-charge-demo-collection-reason")
+            let reason = reasonIndex.flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
+                ?? "error:access_denied"
+            let since = Int(now.addingTimeInterval(-90 - 20 * 60).timeIntervalSince1970)
+            device.collectStatus?["claude"] = "\(reason);failures=\(count);since=\(since)"
+        }
+        var devices = [device]
+        if args.contains("-charge-demo-second-device") || args.contains("-charge-demo-healthy-second-device") {
+            var secondStatus = device.collectStatus
+            if args.contains("-charge-demo-healthy-second-device") { secondStatus?["claude"] = "ok" }
+            devices.append(CollectorDevice(id: "demo-second", label: "Demo-MacMini.local",
+                                           lastSeenAt: at(-90), collectStatus: secondStatus))
+        }
 
         return UsagePayload(
             generatedAt: at(-90),
@@ -95,8 +112,8 @@ enum DemoData {
                 block: live,
                 collectedAt: at(-90)
             )],
-            providers: [claude, codex, gemini],
-            devices: [device]
+            providers: args.contains("-charge-demo-no-claude-card") ? [codex, gemini] : [claude, codex, gemini],
+            devices: devices
         )
     }
 

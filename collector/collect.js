@@ -16,6 +16,7 @@ const daysArg = process.argv.indexOf("--days");
 const parsedDays = daysArg > -1 ? parseInt(process.argv[daysArg + 1], 10) : NaN;
 const DAYS = Number.isFinite(parsedDays) && parsedDays > 0 ? parsedDays : 60;
 const CACHE_FILE = path.join(__dirname, ".last-payload.json");
+const HEALTH_FILE = path.join(__dirname, ".collection-health.json");
 const HOME = process.env.HOME ?? process.env.USERPROFILE;
 
 // 스케줄러가 부를 때는 볼 콘솔이 없으니 출력을 직접 파일로 받는다.
@@ -314,28 +315,50 @@ function freshestCredentials(sources) {
   return sources.reduce((a, b) => (expiresAt(b) > expiresAt(a) ? b : a));
 }
 
-async function claudeCredentials() {
+function claudeCredentialLocation(env = process.env, home = HOME) {
+  const configDir = (env.CLAUDE_CONFIG_DIR || path.join(home, ".claude")).normalize("NFC");
+  // Claude Code supports a separate credential store; an explicit empty override
+  // selects the default store even when CLAUDE_CONFIG_DIR points elsewhere.
+  const override = env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+  const storageDir = (override !== undefined ? override || path.join(home, ".claude") : configDir).normalize("NFC");
+  const scoped = override !== undefined ? !!override : !!env.CLAUDE_CONFIG_DIR;
+  const suffix = scoped
+    ? `-${require("node:crypto").createHash("sha256").update(storageDir).digest("hex").slice(0, 8)}` : "";
+  return { configDir, file: path.join(storageDir, ".credentials.json"), service: `Claude Code-credentials${suffix}` };
+}
+
+async function claudeCredentials({ env = process.env, home = HOME, run = runAsync, read = fs.readFileSync } = {}) {
+  const location = claudeCredentialLocation(env, home);
   const sources = [];
   try {
-    sources.push(JSON.parse(await runAsync("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"])));
+    sources.push(JSON.parse(await run("security", ["find-generic-password", "-s", location.service, "-w"], 10_000)));
   } catch {}
   try {
-    sources.push(JSON.parse(fs.readFileSync(path.join(HOME, ".claude", ".credentials.json"), "utf8")));
+    sources.push(JSON.parse(read(location.file, "utf8")));
   } catch {}
-  if (!sources.length) throw new Error("Claude Code 자격증명 없음");
-  return freshestCredentials(sources);
+  const usable = sources.filter((source) => typeof (source?.claudeAiOauth ?? source)?.accessToken === "string"
+    && (source.claudeAiOauth ?? source).accessToken.trim());
+  if (!usable.length) throw new Error("Claude Code 구독 로그인 정보를 읽을 수 없음");
+  return freshestCredentials(usable);
 }
 
 // Claude: Claude Code OAuth 세션을 재사용해 공식 usage API 조회.
-// 반환: { provider, status } — status "ok" | "auth_expired" | "error",
-// 자격증명 자체가 없으면(미설치) status null이라 collect_status에 항목이 안 생긴다.
+// 반환: { provider, status } — "ok", "auth_expired", or "error[:reason]".
+// 설치 흔적이 없으면 status null; 설치 흔적은 있지만 로그인 정보를 못 읽으면 설정 안내.
 // fetchFn/loadCredentials는 테스트 주입용 — 기본값이면 기존 동작 그대로.
-async function claudeProvider({ fetchFn = fetch, loadCredentials = claudeCredentials } = {}) {
+async function claudeProvider({
+  fetchFn = fetch, loadCredentials = claudeCredentials,
+  hasClaude = () => fs.existsSync(claudeCredentialLocation().configDir),
+} = {}) {
   let cred;
   try {
     cred = await loadCredentials();
   } catch {
-    return { provider: null, status: null }; // 자격증명 없음 = Claude Code 미설치
+    // A config directory without readable subscription credentials is a setup
+    // issue, not proof that Claude Code is absent. Surface it even on first use.
+    const detected = hasClaude();
+    if (detected) console.error("Claude Code 구독 로그인 정보를 읽을 수 없습니다 — 이 PC의 Claude Code에서 /status와 /login을 확인하세요 (API 키 계정은 구독 한도 조회 미지원)");
+    return { provider: null, status: detected ? "error:credentials_missing" : null };
   }
   try {
     const oauth = cred.claudeAiOauth ?? cred;
@@ -355,7 +378,10 @@ async function claudeProvider({ fetchFn = fetch, loadCredentials = claudeCredent
       // 401 = 토큰 만료 (Claude Code를 한 번 실행하면 갱신됨), 그 외는 일시 장애일 가능성.
       // 이 구분이 서버 collect_status로 올라가 앱이 "재로그인 필요"를 안내할 수 있다.
       console.error(`claude usage API ${res.status}${res.status === 401 ? " — 토큰 만료, Claude Code를 실행하면 갱신됩니다" : ""}`);
-      return { provider: null, status: res.status === 401 ? "auth_expired" : "error" };
+      const status = res.status === 401 ? "auth_expired"
+        : res.status === 403 ? "error:access_denied"
+        : res.status === 429 ? "error:rate_limited" : "error";
+      return { provider: null, status };
     }
     const d = await res.json();
     // 계정 UUID → 해시 (프로필 조회 실패 시 null — 캐시 폴백이 채워준다)
@@ -857,6 +883,56 @@ function namespaceUnknownAccounts(providers, installationID) {
     : { ...p, account: unknownAccountKey(installationID, p.id) }));
 }
 
+// Count actual collection cycles, not app refreshes or retries within one request.
+// A long gap (sleep/offline), recovery, or missing observation breaks the streak.
+// Keep the status a string with its original prefix so existing apps/servers can read it.
+function advanceCollectionHealth(statuses, previous = {}, now = Date.now()) {
+  if (statuses === null) return { statuses: null, failures: {} };
+  const failures = {};
+  const annotated = {};
+  for (const [id, value] of Object.entries(statuses)) {
+    const status = value.split(";")[0];
+    if (!status.startsWith("error") && !status.startsWith("auth_expired")) {
+      annotated[id] = status;
+      continue;
+    }
+    const prev = previous?.[id];
+    const continues = Number.isSafeInteger(prev?.count) && prev.count > 0
+      && Number.isFinite(prev.since) && prev.since <= prev.lastAttempt
+      && Number.isFinite(prev.lastAttempt) && now >= prev.lastAttempt
+      && now - prev.lastAttempt <= 12 * 60_000;
+    const count = continues ? Math.min(prev.count + 1, 9999) : 1;
+    const since = continues ? prev.since : now;
+    failures[id] = { count, since, lastAttempt: now };
+    annotated[id] = `${status};failures=${count};since=${Math.floor(since / 1000)}`;
+  }
+  return { statuses: annotated, failures };
+}
+
+function recordCollectionHealth(statuses, {
+  file = HEALTH_FILE, scope = null, now = Date.now(), persist = true,
+} = {}) {
+  let previous = {};
+  try {
+    const saved = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (saved.scope === scope) previous = saved.failures;
+  } catch {}
+  const next = advanceCollectionHealth(statuses, previous, now);
+  if (persist) {
+    // Save independently of the payload: an upload failure must not erase attempts.
+    const temporary = `${file}.${process.pid}.tmp`;
+    try {
+      fs.writeFileSync(temporary, JSON.stringify({ scope, failures: next.failures }), { mode: 0o600 });
+      fs.renameSync(temporary, file);
+    } catch {
+      console.error("수집 실패 횟수를 저장하지 못했습니다");
+    } finally {
+      try { fs.rmSync(temporary, { force: true }); } catch {}
+    }
+  }
+  return next.statuses;
+}
+
 // 업로드 설정 — 우선순위: CHARGE_* 환경변수(테스트용) → ~/.charge/config.json(페어링)
 function resolveMode() {
   if (process.env.CHARGE_TOKEN && process.env.CHARGE_URL && process.env.CHARGE_ANON) {
@@ -913,6 +989,14 @@ async function pairedUpload(mode, daily, live, providers, collectStatus = null, 
 }
 
 async function main() {
+  const mode = resolveMode();
+  // Scheduler environments do not inherit the shell used for pairing. Restore
+  // only the two non-secret location settings, never login tokens or API keys.
+  for (const key of ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"]) {
+    if (process.env[key] === undefined && typeof mode?.claude_environment?.[key] === "string") {
+      process.env[key] = mode.claude_environment[key];
+    }
+  }
   // 이전 성공 페이로드 캐시 — 일부 수집이 실패해도 그 부분만 이전 값으로 유지
   let cache = {};
   try {
@@ -959,8 +1043,11 @@ async function main() {
     statuses: providerCollection.statuses,
   }));
 
-  const mode = resolveMode();
   providers = namespaceUnknownAccounts(providers, mode?.install_id);
+  statuses = recordCollectionHealth(statuses, {
+    scope: accountHash(mode?.token),
+    persist: !DRY_RUN && !!mode,
+  });
 
   if (DRY_RUN) {
     console.log(JSON.stringify({ daily: daily.slice(-1), live, providers, collect_status: statuses }, null, 2));
@@ -989,7 +1076,10 @@ if (require.main === module) {
 
 module.exports = {
   CCUSAGE_PKG,
+  advanceCollectionHealth,
   accountHash,
+  claudeCredentialLocation,
+  claudeCredentials,
   claudeProvider,
   codexBarEntryToProvider,
   codexLiveWindows,
@@ -1009,6 +1099,7 @@ module.exports = {
   pairedUpload,
   parseCodexBarJSON,
   percentValue,
+  recordCollectionHealth,
   resolveMode,
   runAsync,
   sanitizeCachedProvider,

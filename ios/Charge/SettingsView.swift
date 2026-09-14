@@ -28,6 +28,7 @@ struct SettingsView: View {
     /// providers/devices 스냅샷을 조회한 시점의 세션 세대 — 부모가 페이로드와 함께 전달한다.
     /// 이 뷰에서 자체 계산하면 뷰 재생성 시 새 계정의 epoch가 이전 계정의 스냅샷에 붙는다.
     var snapshotEpoch: Int = 0
+    var onProviderVisibilityChanged: (() -> Void)? = nil
 
     /// 이 화면에서 새로 페어링하거나 기기를 지우면 부모 스냅샷 대신 직접 받아온 목록을 쓴다
     @State private var refreshedDevices: [CollectorDevice]?
@@ -53,6 +54,12 @@ struct SettingsView: View {
         var seen = Set<String>()
         var rows = effectiveProviders.compactMap { p in
             seen.insert(p.id).inserted ? (id: p.id, name: p.name) : nil
+        }
+        // A detected tool can need setup before it has ever produced a card.
+        for device in visibleDevices {
+            for issue in device.collectIssues where seen.insert(issue.providerId).inserted {
+                rows.append((id: issue.providerId, name: issue.providerName))
+            }
         }
         let missing = ChargeConfig.knownProviders
             .filter { id, _ in !seen.contains(id) }
@@ -85,6 +92,10 @@ struct SettingsView: View {
                                 set: { on in
                                     if on { hidden.remove(p.id) } else { hidden.insert(p.id) }
                                     ChargeConfig.hiddenProviders = hidden
+                                    var known = ChargeConfig.knownProviders
+                                    known[p.id] = p.name
+                                    ChargeConfig.knownProviders = known
+                                    onProviderVisibilityChanged?()
                                     // 숨김/해제를 알림 예약에도 즉시 반영 — 다음 로드 성공을
                                     // 기다리면 그 사이 숨긴 프로바이더의 알림이 그대로 울린다
                                     if on {
@@ -92,8 +103,10 @@ struct SettingsView: View {
                                     } else {
                                         ResetNotifications.cancelProvider(id: p.id)
                                     }
+                                    WidgetCenter.shared.reloadAllTimelines()
                                 }
                             ))
+                            .accessibilityIdentifier("providerToggle-\(p.id)")
                         }
                         .onMove { source, destination in
                             var ids = rows.map(\.id)
@@ -114,7 +127,7 @@ struct SettingsView: View {
                             }
                         }
                     } footer: {
-                        Text("Toggles hide a provider from the app and widgets. Tap Edit to drag them into your preferred order. New tools appear here automatically.")
+                        Text("Toggles hide cards, warnings, and reset notifications from the app and widgets. PC collection continues. Turn a provider back on anytime. Tap Edit to change the order.")
                     }
                 }
 
@@ -282,6 +295,7 @@ struct SettingsView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
+                        .accessibilityIdentifier("settingsDone")
                 }
             }
             .scrollContentBackground(.hidden)

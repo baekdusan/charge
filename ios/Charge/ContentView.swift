@@ -61,14 +61,15 @@ struct ContentView: View {
                 }
             }
             .sheet(isPresented: $showSettings, onDismiss: {
-                hidden = ChargeConfig.hiddenProviders
+                syncProviderVisibility()
                 Task { await load(reloadWidgets: true) }
             }) {
                 SettingsView(generatedAt: generatedAt, providers: providers, devices: devices,
-                             snapshotEpoch: payloadEpoch)
+                             snapshotEpoch: payloadEpoch,
+                             onProviderVisibilityChanged: syncProviderVisibility)
             }
             .task {
-                hidden = ChargeConfig.hiddenProviders
+                syncProviderVisibility()
                 if !ChargeAuth.hasUsableData {
                     showOnboarding = true
                 }
@@ -101,7 +102,7 @@ struct ContentView: View {
                     showOnboarding = false
                     // 로그아웃이 공유 저장소의 숨김 목록을 비웠으므로 로컬 상태도 다시 읽는다 —
                     // 안 그러면 이전 계정에서 숨긴 id가 새 계정에서도 계속 숨는다
-                    hidden = ChargeConfig.hiddenProviders
+                    syncProviderVisibility()
                     Task { await load(reloadWidgets: true) }
                 }
             }
@@ -113,6 +114,7 @@ struct ContentView: View {
             case .active where wasBackgrounded:
                 // 백그라운드에서 돌아옴 — 최신 데이터로 새로고침하고 위젯도 맞춘다
                 wasBackgrounded = false
+                syncProviderVisibility()
                 Task { await load(reloadWidgets: true) }
             case .background:
                 // 앱을 나가기 직전 위젯이 최신 데이터로 타임라인을 다시 만들게 한다
@@ -129,7 +131,12 @@ struct ContentView: View {
         let duplicates = duplicateProviderIds
         return VStack(spacing: 16) {
             TimelineView(.periodic(from: .now, by: 30)) { context in
-                connectionStatus(at: context.date)
+                VStack(spacing: 12) {
+                    connectionStatus(at: context.date)
+                    ForEach(recoverySuggestions(at: context.date)) { suggestion in
+                        collectionRecoveryCard(suggestion)
+                    }
+                }
             }
             if segmentProviders.count > 1 {
                 Picker("Provider", selection: $segment) {
@@ -142,7 +149,7 @@ struct ContentView: View {
             ForEach(visibleProviders.filter { pid == nil || $0.id == pid }, id: \.uid) {
                 providerCard($0, duplicates: duplicates)
             }
-            if pid == nil || pid == "claude" {
+            if !hidden.contains("claude") && (pid == nil || pid == "claude") {
                 ForEach(displayLiveBlocks) { item in
                     liveCard(item.block, deviceLabel: displayLiveBlocks.count > 1 ? item.deviceLabel : nil)
                 }
@@ -188,6 +195,13 @@ struct ContentView: View {
 
     private var visibleProviders: [Provider] {
         providers.filter { !hidden.contains($0.id) }
+    }
+
+    /// Visibility is a local preference. Apply it immediately, including the
+    /// selected tab, even when the next network refresh is slow or fails.
+    private func syncProviderVisibility() {
+        hidden = ChargeConfig.hiddenProviders
+        if let pid, hidden.contains(pid) { segment = "all" }
     }
 
     /// 같은 프로바이더가 계정별 카드로 2개 이상인 id 집합 — 카드마다 전체를 재스캔하지 않게 한 번만 계산
@@ -240,14 +254,14 @@ struct ContentView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
     }
 
     private func deviceStatusRow(_ device: CollectorDevice, at now: Date) -> some View {
         let isTracking = device.isTracking(at: now)
         let displayName = device.shortLabel ?? String(localized: "Linked PC")
         // 수집 경고는 추적 중일 때만 — 오프라인 기기는 주황 점(Waiting)이 이미 상태를 말해준다
-        let issues = isTracking ? device.collectIssues : []
+        let issues = isTracking ? device.visibleCollectIssues(hidden: hidden) : []
         // 상태를 안 보내는 구버전 수집기는 "이상 없음"이 아니라 "모름"이다, 초록불로 단언하지 않는다
         let statusUnknown = isTracking && issues.isEmpty && device.isLegacyCollector
         // 최신 수집기인데 볼 프로바이더가 하나도 없는 PC(자격증명 전무), 구버전과 같은 안내를 하면
@@ -265,20 +279,26 @@ struct ContentView: View {
                      : noProviders ? "Tracking (no AI tools found)" : "PC tracking active")
                     .font(.caption.weight(.semibold))
                 ForEach(issues) { issue in
-                    // 원인을 단정하지 않는다, 로그인 만료로 보이던 사례가 SSH 세션의 토큰 저장 위치
-                    // 문제였던 적이 있어, 관측한 사실(못 읽고 있다)과 시도해볼 조치를 분리해 적는다
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Charge can't read \(issue.providerName) usage on this PC")
-                            .font(.caption2)
-                            .foregroundStyle(.yellow)
-                            .lineLimit(2)
-                        if issue.isAuthExpired {
-                            Text("Try signing in again in \(issue.providerName)")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(2)
+                        if issue.needsSetup {
+                            Text("Check \(issue.providerName) setup on this PC")
+                        } else if issue.isPersistent(lastAttempt: device.lastSeenDate) {
+                            Text("\(issue.providerName) usage needs attention")
+                        } else if issue.consecutiveFailures != nil {
+                            Text("Retrying \(issue.providerName) usage")
+                        } else {
+                            // Older collectors have no failure count; don't invent one.
+                            Text("Charge can't read \(issue.providerName) usage on this PC")
+                            if issue.isAuthExpired {
+                                Text("Try signing in again in \(issue.providerName)")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
+                    .font(.caption2)
+                    .foregroundStyle(.yellow)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("collectionIssue-\(device.id)-\(issue.providerId)")
                 }
                 if statusUnknown {
                     Text("Update the collector on this PC to see per-provider status")
@@ -309,6 +329,77 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    private struct RecoverySuggestion: Identifiable {
+        let device: CollectorDevice
+        let issue: CollectorDevice.CollectIssue
+        let hasHealthyDevice: Bool
+        var id: String { issue.providerId }
+    }
+
+    private func recoverySuggestions(at now: Date) -> [RecoverySuggestion] {
+        var seen = Set<String>()
+        return sortedDevices.filter { $0.isTracking(at: now) }.flatMap { device in
+            device.visibleCollectIssues(hidden: hidden).compactMap { issue -> RecoverySuggestion? in
+                guard issue.needsSetup || issue.isPersistent(lastAttempt: device.lastSeenDate),
+                      seen.insert(issue.providerId).inserted else { return nil }
+                let healthy = devices.contains {
+                    $0.isTracking(at: now) && $0.collectStatus?[issue.providerId] == "ok"
+                }
+                return RecoverySuggestion(device: device, issue: issue, hasHealthyDevice: healthy)
+            }
+        }
+    }
+
+    private func collectionRecoveryCard(_ suggestion: RecoverySuggestion) -> some View {
+        let issue = suggestion.issue
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("Check \(issue.providerName) usage", systemImage: "exclamationmark.circle")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.yellow)
+            if let label = suggestion.device.shortLabel {
+                Text(verbatim: label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if !issue.needsSetup, let count = issue.consecutiveFailures {
+                Text("\(count) consecutive attempts failed over at least 20 minutes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(issue.guidance)
+                .font(.footnote)
+            if suggestion.hasHealthyDevice {
+                Text("Another PC is reporting this provider normally. Check the PC shown above.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No longer using it? Hide its cards, warnings, and reset notifications. You can show it again in Settings. PC collection continues.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Hide \(issue.providerName)") {
+                    hideProvider(issue)
+                }
+                .font(.subheadline.weight(.semibold))
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("hideProvider-\(issue.providerId)")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardStyle()
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("collectionRecovery-\(issue.providerId)")
+    }
+
+    private func hideProvider(_ issue: CollectorDevice.CollectIssue) {
+        var known = ChargeConfig.knownProviders
+        known[issue.providerId] = issue.providerName
+        ChargeConfig.knownProviders = known
+        ChargeConfig.setHidden(issue.providerId, true)
+        syncProviderVisibility()
+        ResetNotifications.cancelProvider(id: issue.providerId)
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     // MARK: 스트릭 (잔디)
@@ -672,6 +763,7 @@ struct ContentView: View {
     // 메인 스레드를 벗어난다 — loading 인디케이터가 안 그려지는 원인. 명시적으로 메인에 격리한다.
     @MainActor
     private func load(reloadWidgets: Bool = false) async {
+        syncProviderVisibility()
         // 이미 로드 중이면 끝날 때까지 기다렸다가 새로 로드한다 (풀 리프레시가 즉시 끝나 보이는 것 방지)
         while loading {
             try? await Task.sleep(nanoseconds: 100_000_000)
@@ -691,8 +783,7 @@ struct ContentView: View {
             devices = payload.devices ?? []
             payloadEpoch = epoch
             ChargeConfig.rememberProviders(providers)
-            // 숨긴 프로바이더는 알림도 받지 않는다 — 설정 시트가 떠 있는 동안 이 뷰의
-            // hidden 상태는 갱신되지 않으므로, 공유 저장소의 최신 숨김 목록으로 거른다.
+            // 숨긴 프로바이더는 알림도 받지 않는다 — 예약 시점의 공유 저장소 설정으로 거른다.
             // (데모 모드 처리는 reschedule 내부에서 — 예약 대신 기존 알림까지 정리한다)
             ResetNotifications.reschedule(
                 providers: providers.filter { !ChargeConfig.hiddenProviders.contains($0.id) },

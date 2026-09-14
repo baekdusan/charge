@@ -189,7 +189,12 @@ async function pair(code) {
   // 디바이스 토큰은 본인만 읽을 수 있게 저장 (0700/0600)
   fs.mkdirSync(CONF_DIR, { recursive: true, mode: 0o700 });
   try { fs.chmodSync(CONF_DIR, 0o700); } catch {}
-  fs.writeFileSync(CONF, JSON.stringify({ url, anon, token, install_id: installationID }, null, 2), { mode: 0o600 });
+  const claude_environment = Object.fromEntries(
+    ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"]
+      .filter((key) => process.env[key] !== undefined)
+      .map((key) => [key, process.env[key]])
+  );
+  fs.writeFileSync(CONF, JSON.stringify({ url, anon, token, install_id: installationID, claude_environment }, null, 2), { mode: 0o600 });
   try { fs.chmodSync(CONF, 0o600); } catch {}
   console.log(`✓ 페어링 완료 — 이 컴퓨터가 '${label}'(으)로 등록되었습니다.`);
 }

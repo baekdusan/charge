@@ -370,6 +370,44 @@ struct CollectorDevice: Codable, Identifiable {
         let status: String
         var id: String { providerId }
         var isAuthExpired: Bool { status.hasPrefix("auth_expired") }
+        var isRateLimited: Bool { status.hasPrefix("error:rate_limited") }
+        var isAccessDenied: Bool { status.hasPrefix("error:access_denied") }
+        var needsSetup: Bool { status.hasPrefix("error:credentials_missing") }
+
+        private func detail(_ key: String) -> String? {
+            status.split(separator: ";").dropFirst().compactMap { part -> String? in
+                let pair = part.split(separator: "=", maxSplits: 1)
+                return pair.count == 2 && pair[0] == key ? String(pair[1]) : nil
+            }.first
+        }
+
+        var consecutiveFailures: Int? {
+            guard let raw = detail("failures"), let count = Int(raw), count > 0 else { return nil }
+            return count
+        }
+
+        /// Use the last collector report, not wall-clock time: leaving the app
+        /// open must not turn five quick retries into twenty minutes of failures.
+        func isPersistent(lastAttempt: Date?) -> Bool {
+            guard let count = consecutiveFailures, count >= 5,
+                  let raw = detail("since"), let seconds = TimeInterval(raw), seconds.isFinite,
+                  let lastAttempt else { return false }
+            let duration = lastAttempt.timeIntervalSince1970 - seconds
+            return seconds > 0 && duration >= 20 * 60
+        }
+
+        var guidance: String {
+            if needsSetup {
+                return String(localized: "Charge found Claude Code but couldn't read its subscription sign-in. Open Claude Code on this PC and check /status. API-key accounts don't provide subscription limits.")
+            }
+            if isRateLimited {
+                return String(localized: "The usage service is limiting requests. Charge will retry automatically. This does not mean your subscription has ended.")
+            }
+            if isAuthExpired || isAccessDenied {
+                return String(localized: "Check your sign-in and subscription on this PC. Access may have changed, but Charge can't confirm whether your subscription ended.")
+            }
+            return String(localized: "The usage service may be temporarily unavailable. Check your connection and try again later. Charge will keep retrying.")
+        }
     }
 
     /// 경고로 보여줄 항목만 추린다 — "auth_expired"/"error"류(접두 매칭)만 경고.
@@ -385,6 +423,10 @@ struct CollectorDevice: Codable, Identifiable {
                     status: status
                 )
             }
+    }
+
+    func visibleCollectIssues(hidden: Set<String>) -> [CollectIssue] {
+        collectIssues.filter { !hidden.contains($0.providerId) }
     }
 }
 

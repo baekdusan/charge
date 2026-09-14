@@ -1,6 +1,136 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Check %@ setup on this PC": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 PC의 %@ 로그인 설정을 확인해 주세요"
+          }
+        }
+      }
+    },
+    "%@ usage needs attention": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 사용량 확인이 필요해요"
+          }
+        }
+      }
+    },
+    "Retrying %@ usage": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 사용량을 다시 확인하고 있어요"
+          }
+        }
+      }
+    },
+    "Check %@ usage": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 사용량을 확인해 주세요"
+          }
+        }
+      }
+    },
+    "%lld consecutive attempts failed over at least 20 minutes.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "20분 이상, %lld회 연속으로 조회에 실패했어요."
+          }
+        }
+      }
+    },
+    "Charge found Claude Code but couldn't read its subscription sign-in. Open Claude Code on this PC and check /status. API-key accounts don't provide subscription limits.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Claude Code를 찾았지만 구독 로그인 정보를 읽지 못했어요. 이 PC에서 Claude Code를 열고 /status로 로그인 상태를 확인해 주세요. API 키 계정에서는 구독 한도를 조회할 수 없어요."
+          }
+        }
+      }
+    },
+    "The usage service is limiting requests. Charge will retry automatically. This does not mean your subscription has ended.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용량 조회 요청이 일시적으로 제한됐어요. 자동으로 다시 확인할게요. 이 오류가 구독 해지를 뜻하지는 않아요."
+          }
+        }
+      }
+    },
+    "Check your sign-in and subscription on this PC. Access may have changed, but Charge can't confirm whether your subscription ended.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "이 PC의 로그인과 구독 상태를 확인해 주세요. 접근 권한이 달라졌을 수 있지만, Charge에서 구독 해지 여부를 확인할 수는 없어요."
+          }
+        }
+      }
+    },
+    "The usage service may be temporarily unavailable. Check your connection and try again later. Charge will keep retrying.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용량 조회 서비스에 일시적인 문제가 있을 수 있어요. 인터넷 연결을 확인해 주세요. Charge가 자동으로 다시 시도할게요."
+          }
+        }
+      }
+    },
+    "Another PC is reporting this provider normally. Check the PC shown above.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "다른 PC에서는 이 서비스가 정상적으로 수집되고 있어요. 위에 표시된 PC를 확인해 주세요."
+          }
+        }
+      }
+    },
+    "No longer using it? Hide its cards, warnings, and reset notifications. You can show it again in Settings. PC collection continues.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "더 이상 사용하지 않나요? 카드와 경고, 한도 리셋 알림을 숨길 수 있어요. 설정에서 언제든 다시 켤 수 있으며 PC의 수집은 계속됩니다."
+          }
+        }
+      }
+    },
+    "Hide %@": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ 숨기기"
+          }
+        }
+      }
+    },
+    "Toggles hide cards, warnings, and reset notifications from the app and widgets. PC collection continues. Turn a provider back on anytime. Tap Edit to change the order.": {
+      "localizations": {
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "끄면 앱과 위젯의 카드, 경고, 한도 리셋 알림이 숨겨져요. PC의 수집은 계속되며 언제든 다시 켤 수 있어요. 편집을 눌러 순서를 바꿀 수 있어요."
+          }
+        }
+      }
+    },
     "%@" : {
 
     },

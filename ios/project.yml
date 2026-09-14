@@ -7,7 +7,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "1.0.1"
+    MARKETING_VERSION: "1.0.2"
     CURRENT_PROJECT_VERSION: "1"
     # 재생성 시에도 서명 팀 유지 (오픈소스 사용자는 자기 팀 ID로 교체)
     DEVELOPMENT_TEAM: 27AD4X6UKW
@@ -49,8 +49,21 @@ targets:
     scheme:
       testTargets:
         - ChargeUITests
+        - ChargeTests
       gatherCoverageData: false
-  # 스크린샷 자동화 전용 (App Store 스크린샷을 데모 모드로 촬영) — 앱 배포에는 포함되지 않는다
+  ChargeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ChargeTests
+    dependencies:
+      - target: Charge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dusan.charge.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  # UI 회귀 검사와 App Store 스크린샷 자동화 — 앱 배포에는 포함되지 않는다
   ChargeUITests:
     type: bundle.ui-testing
     platform: iOS
