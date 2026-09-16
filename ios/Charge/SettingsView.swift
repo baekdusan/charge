@@ -355,6 +355,19 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                if let version = device.reportedCollectorVersion {
+                    Text("Collector \(version)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                // 0.2.0 미만(또는 버전을 안 보내는) 수집기는 스스로 업데이트하지 못한다.
+                // 업로드가 오는 기기에만 말한다, 꺼진 PC에는 어차피 지금 실행할 수 없다.
+                if device.needsCollectorUpdate(at: now) {
+                    Text("Update the collector on this PC: npx charge-connect@latest update")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .swipeActions {

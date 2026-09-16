@@ -1,6 +1,198 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Usage couldn't be collected for at least %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage couldn't be collected for at least %@."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 이상 사용량을 수집하지 못했어요."
+          }
+        }
+      }
+    },
+    "No recent data" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No recent data"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "최근 데이터 없음"
+          }
+        }
+      }
+    },
+    "Open Claude Code on this PC once" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Claude Code on this PC once"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC에서 Claude Code를 한 번 열어 주세요"
+          }
+        }
+      }
+    },
+    "Sign in again in Claude Code (/login)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in again in Claude Code (/login)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code에서 다시 로그인해 주세요 (/login)"
+          }
+        }
+      }
+    },
+    "Open Claude Code on this PC once (run /login if asked)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Claude Code on this PC once (run /login if asked)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC에서 Claude Code를 한 번 열어 주세요 (로그인을 요청하면 /login)"
+          }
+        }
+      }
+    },
+    "Charge couldn't use Claude Code's sign-in on this PC. Opening Claude Code on this PC once usually refreshes it. If Claude Code asks you to sign in, run /login." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Charge couldn't use Claude Code's sign-in on this PC. Opening Claude Code on this PC once usually refreshes it. If Claude Code asks you to sign in, run /login."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC의 Claude Code 로그인을 쓸 수 없었어요. 이 PC에서 Claude Code를 한 번 열면 보통 자동으로 갱신돼요. Claude Code가 로그인을 요청하면 /login 을 실행해 주세요."
+          }
+        }
+      }
+    },
+    "Claude Code's sign-in on this PC has expired. Open Claude Code on this PC once and it refreshes automatically. You don't need to sign in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code's sign-in on this PC has expired. Open Claude Code on this PC once and it refreshes automatically. You don't need to sign in again."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC의 Claude Code 로그인이 만료됐어요. 이 PC에서 Claude Code를 한 번 열면 자동으로 갱신돼요. 다시 로그인하지 않아도 돼요."
+          }
+        }
+      }
+    },
+    "Claude Code's sign-in on this PC is no longer valid. Run /login in Claude Code on this PC to sign in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code's sign-in on this PC is no longer valid. Run /login in Claude Code on this PC to sign in again."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC의 Claude Code 로그인이 더 이상 유효하지 않아요. 이 PC의 Claude Code에서 /login 을 실행해 다시 로그인해 주세요."
+          }
+        }
+      }
+    },
+    "Next try around %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next try around %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@쯤 다시 시도해요"
+          }
+        }
+      }
+    },
+    "Charge will try again around %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Charge will try again around %@."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@쯤 다시 시도할게요."
+          }
+        }
+      }
+    },
+    "Collector %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collector %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "수집기 %@"
+          }
+        }
+      }
+    },
+    "Update the collector on this PC: npx charge-connect@latest update" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update the collector on this PC: npx charge-connect@latest update"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC에서 npx charge-connect@latest update 를 실행해 수집기를 업데이트하세요"
+          }
+        }
+      }
+    },
     "Check %@ setup on this PC": {
       "localizations": {
         "ko": {
@@ -37,16 +229,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ 사용량을 확인해 주세요"
-          }
-        }
-      }
-    },
-    "%lld consecutive attempts failed over at least 20 minutes.": {
-      "localizations": {
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "20분 이상, %lld회 연속으로 조회에 실패했어요."
           }
         }
       }
@@ -134,16 +316,6 @@
     "%@" : {
 
     },
-    "%@ collection failing on this PC" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ 수집이 이 PC에서 실패하고 있어요"
-          }
-        }
-      }
-    },
     "%@ limit just reset." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -151,16 +323,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 한도가 방금 리셋됐어요."
-          }
-        }
-      }
-    },
-    "%@ sign-in expired — open %@ on this PC once" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ 로그인이 만료됐어요 — 이 PC에서 %2$@를 한 번 열어 주세요"
           }
         }
       }
@@ -185,6 +347,16 @@
         }
       }
     },
+    "%@ unavailable" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 사용 불가"
+          }
+        }
+      }
+    },
     "%@ weekly" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -196,85 +368,15 @@
         }
       }
     },
+    "%@%%" : {
+
+    },
     "%@/hr" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@/시간"
-          }
-        }
-      }
-    },
-    "%@%@%%" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@%2$@%%"
-          }
-        }
-      }
-    },
-    "%@%%" : {
-
-    },
-    "⚡ On pace to run out in %@" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "⚡ 이 속도면 %@ 후 소진"
-          }
-        }
-      }
-    },
-    "⚡ Welcome to Charge" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "⚡ Charge에 오신 걸 환영해요"
-          }
-        }
-      }
-    },
-    "🔥 %@ day streak" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "🔥 %@일 연속"
-          }
-        }
-      }
-    },
-    "5h %@" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "5시간 창 %@"
-          }
-        }
-      }
-    },
-    "7d" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "7일"
-          }
-        }
-      }
-    },
-    "7d %@" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "7일 %@"
           }
         }
       }
@@ -309,6 +411,36 @@
         }
       }
     },
+    "5h %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5시간 창 %@"
+          }
+        }
+      }
+    },
+    "7d" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7일"
+          }
+        }
+      }
+    },
+    "7d %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "7일 %@"
+          }
+        }
+      }
+    },
     "About" : {
       "localizations" : {
         "ko" : {
@@ -335,6 +467,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "전체"
+          }
+        }
+      }
+    },
+    "Available %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@부터 사용 가능"
           }
         }
       }
@@ -393,17 +535,6 @@
         }
       }
     },
-    "charge = battery + billing" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "충전 + 청구"
-          }
-        }
-      }
-    },
     "Charge can't read %@ usage on this PC" : {
       "localizations" : {
         "ko" : {
@@ -425,17 +556,6 @@
         }
       }
     },
-    "Checking now…" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "지금 확인하는 중…"
-          }
-        }
-      }
-    },
     "Checking PC connection" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -443,6 +563,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "PC 연결 확인 중"
+          }
+        }
+      }
+    },
+    "Checking now…" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "지금 확인하는 중…"
           }
         }
       }
@@ -576,6 +707,7 @@
       }
     },
     "Data from %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -586,6 +718,7 @@
       }
     },
     "Data out of date" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -657,16 +790,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Charge가 마음에 드세요? 리뷰 남기기"
-          }
-        }
-      }
-    },
-    "estimated" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "추정"
           }
         }
       }
@@ -798,6 +921,16 @@
         }
       }
     },
+    "Last checked status" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "마지막 확인 당시 상태"
+          }
+        }
+      }
+    },
     "Last collected" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -816,6 +949,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "한도 숫자"
+          }
+        }
+      }
+    },
+    "Limit Ring" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "한도 링"
           }
         }
       }
@@ -841,17 +985,6 @@
         }
       }
     },
-    "Limit Ring" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "한도 링"
-          }
-        }
-      }
-    },
     "Linked PC" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -859,6 +992,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "연결된 PC"
+          }
+        }
+      }
+    },
+    "MAX" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "소진"
           }
         }
       }
@@ -895,6 +1038,17 @@
         }
       }
     },
+    "No PC paired" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결된 PC 없음"
+          }
+        }
+      }
+    },
     "No active session" : {
       "localizations" : {
         "ko" : {
@@ -922,17 +1076,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "아직 데이터가 없어요 — 위 명령을 실행하고 잠시 뒤 다시 시도하세요."
-          }
-        }
-      }
-    },
-    "No PC paired" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "연결된 PC 없음"
           }
         }
       }
@@ -977,6 +1120,17 @@
         }
       }
     },
+    "PC tracking active" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PC 사용량 추적 중"
+          }
+        }
+      }
+    },
     "Pair another computer" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1005,17 +1159,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "프로젝트 URL과 anon 키를 붙여넣으세요 (service_role 키 아님)."
-          }
-        }
-      }
-    },
-    "PC tracking active" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "PC 사용량 추적 중"
           }
         }
       }
@@ -1102,6 +1245,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "프로바이더"
+          }
+        }
+      }
+    },
+    "Reset time unavailable" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "재설정 시각을 확인할 수 없음"
           }
         }
       }
@@ -1201,6 +1354,16 @@
         }
       }
     },
+    "Server error (%lld)" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "서버 오류 (%lld)"
+          }
+        }
+      }
+    },
     "Session" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1213,6 +1376,7 @@
       }
     },
     "Session and weekly percentages of your busiest provider." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -1386,23 +1550,32 @@
         }
       }
     },
-    "soon" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "곧"
-          }
-        }
-      }
-    },
     "Streak" : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "스트릭"
+          }
+        }
+      }
+    },
+    "Streak protected" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "스트릭 보호일"
+          }
+        }
+      }
+    },
+    "Streak protected today" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘 스트릭 보호됨"
           }
         }
       }
@@ -1468,23 +1641,6 @@
         }
       }
     },
-    "today_peak_ratio" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Today is %lld%% of your recent peak"
-          }
-        },
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "오늘은 최근 최고치의 %lld%%를 썼어요"
-          }
-        }
-      }
-    },
     "Today's AI coding cost and the current 5h window." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1518,6 +1674,7 @@
       }
     },
     "Tracking (no AI tools found)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -1528,6 +1685,7 @@
       }
     },
     "Tracking (status unknown)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -1558,7 +1716,28 @@
         }
       }
     },
+    "Unavailable" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용 불가"
+          }
+        }
+      }
+    },
+    "Unavailable · %@ limit reached" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용 불가 · %@ 한도 소진"
+          }
+        }
+      }
+    },
     "Unidentified account" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -1569,6 +1748,7 @@
       }
     },
     "Unnamed device" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ko" : {
           "stringUnit" : {
@@ -1643,16 +1823,6 @@
         }
       }
     },
-    "Usage history uploaded by this computer will also be deleted. Its collector stops syncing until you pair it again." : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "이 컴퓨터가 업로드한 사용 기록도 함께 삭제됩니다. 다시 페어링하기 전까지 이 컴퓨터의 수집기는 동기화되지 않습니다."
-          }
-        }
-      }
-    },
     "Usage Inline" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1675,12 +1845,12 @@
         }
       }
     },
-    "used" : {
+    "Usage history uploaded by this computer will also be deleted. Its collector stops syncing until you pair it again." : {
       "localizations" : {
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "사용"
+            "value" : "이 컴퓨터가 업로드한 사용 기록도 함께 삭제됩니다. 다시 페어링하기 전까지 이 컴퓨터의 수집기는 동기화되지 않습니다."
           }
         }
       }
@@ -1755,6 +1925,95 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "계정과 서버에 동기화된 모든 사용량 데이터가 영구 삭제됩니다. 되돌릴 수 없습니다."
+          }
+        }
+      }
+    },
+    "charge = battery + billing" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "충전 + 청구"
+          }
+        }
+      }
+    },
+    "estimated" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "추정"
+          }
+        }
+      }
+    },
+    "soon" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "곧"
+          }
+        }
+      }
+    },
+    "today_peak_ratio" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today is %lld%% of your recent peak"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오늘은 최근 최고치의 %lld%%를 썼어요"
+          }
+        }
+      }
+    },
+    "used" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사용"
+          }
+        }
+      }
+    },
+    "⚡ On pace to run out in %@" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⚡ 이 속도면 %@ 후 소진"
+          }
+        }
+      }
+    },
+    "⚡ Welcome to Charge" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⚡ Charge에 오신 걸 환영해요"
+          }
+        }
+      }
+    },
+    "🔥 %@ day streak" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "🔥 %@일 연속"
           }
         }
       }

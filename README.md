@@ -126,7 +126,11 @@ Charge is built to see as little as possible:
 
 Pair each machine with its own code (Settings → *Pair another computer*). Daily cost/tokens are stored **per machine and summed by date** in the app: $40 on your MacBook and $10 on your Mac mini shows as $50, and one machine going offline never erases the other's history.
 
-Rate limits and plans are account-level, and every upload carries a **collection timestamp**. The server keeps only the freshest data per account, so an idle machine with an expired login can never overwrite the live gauges reported by the machine you're actually working on. If a provider fails, Charge shows that it is retrying. After **at least 5 consecutive collection attempts over at least 20 minutes**, it offers guidance specific to the error. Successful collection or a gap longer than 12 minutes resets the streak; refreshing the iPhone app does not count as another attempt. This requires the updated app and collector.
+Rate limits and plans are account-level, and every upload carries a **collection timestamp**. The server keeps only the freshest data per account, so an idle machine with an expired login can never overwrite the live gauges reported by the machine you're actually working on.
+
+Claude's usage endpoint is rate limited per Claude account, so computers paired to the same Charge account **take turns** when they are signed in to the same Claude account. In each 5-minute cycle one computer holds a short turn on the backend and asks Claude; the others skip the request and report `shared`, which is not a problem and shows no warning. The computer holding the turn renews it every cycle, and if it sleeps or goes offline another computer takes over in the next cycle. A computer whose Claude Code sign-in has expired, or whose last request failed for a reason other than a rate limit, leaves the turn to another computer. During a rate limit (HTTP `429`) the computer holding the turn keeps it and waits out the limit, so the other computers stay quiet as well. Their `shared` reports do not count as another computer reporting Claude normally, so if the limit lasts, the recovery card for the computer holding the turn still offers to hide Claude instead of pointing to another computer. Computers paired to different Charge accounts do not coordinate, and collectors older than 0.2.0 do not take turns.
+
+If a provider fails, that computer's status line in the app says so. An expired or revoked Claude Code sign-in is flagged right away, together with the fix (open Claude Code on that computer once, or run `/login` if the sign-in was revoked). Other errors, such as rate limits, show as retrying until they have lasted **at least 20 minutes**, and any problem that lasts that long also gets a card with guidance for that error. Successful collection or a gap longer than 12 minutes starts that period over. The period is measured from the computer's own reports, so leaving the iPhone app open or refreshing it does not lengthen it. This requires the updated app and collector. App 1.0.2 and earlier show a count of consecutive collection attempts instead; with collector 0.2.0 that count also includes cycles in which the collector deliberately sent no request (an expired sign-in, or waiting out a rate limit).
 
 You can hide an unused provider from the recovery card or Settings. This hides its cards, warnings, and reset notifications across the app and widgets, including warnings from other paired computers. Desktop collection and historical cost totals continue. Turn the provider back on in Settings to restore it. Charge does not infer subscription cancellation from a failed request.
 
@@ -163,6 +167,48 @@ Backend config lives in `ios/Shared/CloudConfig.txt` (line 1 URL, line 2 anon ke
 | Unregister (Windows) | `Unregister-ScheduledTask -TaskName ChargeConnect` |
 | Unregister (Linux/WSL) | `systemctl --user disable --now charge-connect.timer` |
 | Unpair (and revoke token) | `npx charge-connect unpair` |
+| Update an existing install | `npx charge-connect@latest update` |
+
+### Updating the collector
+
+Collectors from **0.2.0** update themselves. At most once every 12 hours (plus up to an hour of random jitter), after uploading, the scheduled run asks the backend for the latest release manifest and installs it only if all of these checks pass:
+
+- every manifest field has a strict format before anything else is looked at: key id `[a-z0-9]{1,16}`, a plain `x.y.z` version, an npm `sha512-` integrity, and a 64-byte base64 signature;
+- the key id is one of the public keys embedded in `collector/updater.js` (unknown ids are rejected), and the Ed25519 signature over `charge-connect-release/v1\n<key_id>\n<version>\n<integrity>\n<tarball>` verifies against that key;
+- the tarball URL is exactly `https://registry.npmjs.org/charge-connect/-/charge-connect-<version>.tgz`, the version is strictly newer (no pre-releases), and this computer has not already rolled back the same version and integrity after a failed post-install self-test;
+- the download (fetched without following redirects, 2 MB cap) matches the signed `sha512` integrity before anything is unpacked;
+- the package contains only regular top-level files (no links, `..`, absolute paths, or subdirectories), is named `charge-connect` with the manifest's version, every `.js` passes `node --check`, and the new `collect.js --self-test` succeeds in the staging directory. The self-test loads every runtime module and prints the version without touching the network, the keychain, or any state file. It runs with a throwaway `--log` file, the way the Windows and Linux schedules start the collector, so a release that breaks while setting up its log is caught too.
+
+The current runtime is backed up to `~/.charge/app.prev/`, and the files in `~/.charge/app` are replaced in place. A rename blocked by a transient Windows lock (`EPERM`, `EBUSY`, `EACCES`) is retried up to 5 times, 200 ms apart, before the swap is rolled back. After the swap the self-test runs again from `~/.charge/app`; if it fails, every file is restored from `~/.charge/app.prev/`. When the self-test process itself exits with an error, that release (version and integrity) is remembered so it is never retried, while a later, higher release still installs. A self-test that times out, is killed, or can't start for a local I/O reason only rolls back, and the same release is tried again in the next window. The new version runs from the next collection. Before the swap starts, an in-progress marker lists the files, the from/to versions, and the updating process. A run that starts while that process is still running (an overlapping schedule or a manual run, within 10 minutes of the marker) skips its collection and leaves the files alone. If the swap is cut off midway (power loss, a killed task), the next run finds the marker, restores `~/.charge/app.prev/` before it loads any other module, logs it, and re-runs itself with the restored `collect.js`. The updater reports success, or remembers a failed post-install self-test, only while the marker is still its own and every installed file matches the staged release; if another run restored the backup in the meantime, the update is rolled back and tried again in the next window. Pairing (`config.json`, `device.json`), collector state files, and the schedule itself (launchd, systemd, Task Scheduler) are left untouched. If a check fails, the log gets one line and the collector tries again in the next window. A run that fails before uploading, including one ended by an uncaught exception or unhandled rejection, still checks for updates before it exits (for at most 3 minutes), so a release with a runtime bug can be repaired by publishing a fixed one.
+
+Collectors **0.1.x** can't update themselves. Run this once on each paired computer:
+
+```bash
+npx charge-connect@latest update
+```
+
+This copies the new runtime into `~/.charge/app` and keeps your pairing. It re-registers the schedule only where that is safe to repeat unattended: on Linux, and on macOS when no launch agent points at the runtime yet. On Windows it prints the `install.ps1` command instead of re-running it, so a hidden task created from an Administrator PowerShell isn't downgraded. If `~/.charge/app` already holds a newer version (for example after an automatic update), it keeps those files instead of copying an older package over them. Finally, it runs one collection and prints the installed version.
+
+To opt out of automatic updates, add `"auto_update": false` to `~/.charge/config.json`, or set `CHARGE_SKIP_UPDATE=1` in the collector's environment.
+
+### Releasing the collector (maintainers)
+
+1. Deploy the backend first. Apply `supabase/schema-v2.sql` (idempotent; check it locally with `supabase/test-local.sh`) **before** you `npm publish` a collector that relies on it; 0.2.0 is the first. On an older backend a 0.2.0 collector keeps collecting, but the backend stores its `_collector` version key inside `collect_status` (app 1.0.2 then shows a PC with no AI tools as "PC tracking active"), the Claude poll lease (`charge_claim_poll`) is missing so every paired computer fails open and polls Claude on its own instead of taking turns, and there is no release table (with its `key_id` column) to register a manifest in.
+2. Bump `collector/package.json`, run `cd collector && npm test`, then `npm publish` from that same checkout.
+3. Sign and register the release manifest. The signing key lives only at `~/.charge/release-signing-key.pem` (or pass `CHARGE_SIGNING_KEY` as a PEM path or PEM text); never commit it.
+
+   ```bash
+   cd collector
+   node scripts/publish-manifest.js <version>           # prints an idempotent SQL upsert to review
+   node scripts/publish-manifest.js <version> --apply   # applies it with psql
+   node scripts/publish-manifest.js <version> --key-id k2 --apply   # signs with another embedded key id (default k1)
+   ```
+
+   The script reads `npm view charge-connect@<version> dist --json` and refuses any tarball URL other than the registry URL above. It then downloads that tarball (without following redirects), recomputes its `sha512` integrity, and compares every file the updater would install with your local `collector/` checkout (`package.json` by value, since npm rewrites its formatting). Any difference, including a file missing on either side, stops the release before the signing key is even read, so a tarball you did not build never gets a signature. Only then does it sign `charge-connect-release/v1\n<key_id>\n<version>\n<integrity>\n<tarball>`, runs the same field format checks the collector runs, and checks the signature against the collector's embedded key for that key id before it prints or applies anything. A key id that is not embedded in `collector/updater.js` is refused up front, and so is one missing from `updater.js` in the previous release on npm (installed collectors only know the keys of the release they run). A previous release without `RELEASE_KEYS` (0.1.x) sets no such limit. The backend must already have `charge_collector_releases` (including `key_id`) and `charge_latest_collector()` from `supabase/schema-v2.sql`. Installed 0.2.0+ collectors pick up the release within about 13 hours.
+
+4. Rotating the signing key: add the new public key under a new id to `RELEASE_KEYS` in `collector/updater.js`, publish that collector signed with the current key, wait until installs have picked it up, then sign later releases with `--key-id <new id>`. The script refuses `--key-id <new id>` for the release that first adds the key.
+
+**Stopping and rolling back a release.** Collectors only read the newest row of `charge_collector_releases`. Deleting a bad release's row is the kill switch: the newest row becomes the previous release, which no updated collector treats as newer, so no further computer installs the bad one. Auto-update never downgrades, so computers that already installed it are repaired by publishing a higher, fixed version (a computer whose post-install self-test failed has already restored `~/.charge/app.prev/` on its own).
 
 ## 🗺️ Roadmap
 

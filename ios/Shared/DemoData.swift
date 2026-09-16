@@ -8,10 +8,10 @@ enum DemoData {
     /// collectedAt이 staleAge를 넘겨 모든 카드에 "Data from N min ago"가 붙고 위젯 게이지가 흐려진다.
     /// (같은 이유로 lastSeenAt은 12분 뒤 "추적 중"이 풀리고, live 블록은 3.2시간 뒤 만료된다.
     ///  심사, 스크린샷이 통째로 그 상태로 걸린다.)
-    /// 다만 기준 시각은 수집 주기(5분) 격자로 내림해 같은 격자 안에서는 값이 완전히 동일하다 , 
+    /// 다만 기준 시각은 수집 주기(5분) 격자로 내림해 같은 격자 안에서는 값이 완전히 동일하다.
     /// resetsAt이 호출마다 흔들리면 위젯 지문이 매번 달라져 60초 폴링이 내용 변화 없이도
     /// reloadAllTimelines를 반복하게 된다. 카운트다운 표시는 어차피 뷰(TimelineView)가 현재 시각으로 그린다.
-    static var payload: UsagePayload { make(now: gridNow()) }
+    static var payload: UsagePayload { make(now: gridNow(), arguments: CommandLine.arguments) }
 
     private static let iso = ISO8601DateFormatter()
 
@@ -22,16 +22,41 @@ enum DemoData {
         return Date(timeIntervalSinceReferenceDate: (t / grid).rounded(.down) * grid)
     }
 
-    private static func make(now: Date) -> UsagePayload {
+    /// 런치 인자는 로직 테스트가 주입할 수 있게 인자로 받는다(앱은 CommandLine.arguments를 넘긴다)
+    static func make(now: Date, arguments: [String]) -> UsagePayload {
         func at(_ seconds: TimeInterval) -> String { iso.string(from: now.addingTimeInterval(seconds)) }
+        let args = arguments
+
+        // 화면 확인용 픽스처, 데모 모드의 이 프로세스에만 적용된다(인자가 없으면 기본 데모 데이터 그대로다).
+        // -charge-demo-quota-protection: Claude 주간 한도 100%, 어제와 오늘을 모두 덮는 차단 구간, 그 이틀의
+        // Claude 사용량 0. Claude 탭의 스트릭에 "오늘 스트릭 보호됨"과 보호일 칸이 그려진다.
+        let quotaProtection = args.contains("-charge-demo-quota-protection")
+        // -charge-demo-stale-claude: 사흘 전에 수집된 Claude 스냅샷, 리셋 시각 없는 세션 창.
+        // 세션 게이지가 0%가 아니라 값 미상("최근 데이터 없음")으로 그려진다.
+        let staleClaude = args.contains("-charge-demo-stale-claude")
 
         // 세션 창: 5시간 중 3시간 경과(60%), 주간 창: 7일 중 4.2일 경과
+        var claudeSession = RateWindow(percent: 34, resetsAt: at(2 * 3600), windowMinutes: 300)
+        var claudeWeekly = RateWindow(percent: 62, resetsAt: at(2.8 * 86400), windowMinutes: 10_080)
+        var claudeCollectedAt = at(-90)
+        let blockedWeeklyReset = at(1.3 * 86400)
+        if quotaProtection {
+            // 주간 한도에 막히면 세션은 쉬는 중이라 리셋 시각이 없다(수집기의 five_hour 창)
+            claudeSession = RateWindow(percent: 0, resetsAt: nil, windowMinutes: 300)
+            claudeWeekly = RateWindow(percent: 100, resetsAt: blockedWeeklyReset, windowMinutes: 10_080)
+        }
+        if staleClaude {
+            // 묵은 스냅샷 + 리셋 시각 없는 세션 = 값 미상. 주간은 리셋 시각을 알아 흐린 숫자로 남는다
+            claudeSession = RateWindow(percent: claudeSession.percent, resetsAt: nil, windowMinutes: 300)
+            claudeCollectedAt = at(-3 * 86400)
+        }
+
         let claude = Provider(
             id: "claude",
             name: "Claude",
             plan: "Max 20x",
-            session: RateWindow(percent: 34, resetsAt: at(2 * 3600), windowMinutes: 300),
-            weekly: RateWindow(percent: 62, resetsAt: at(2.8 * 86400), windowMinutes: 10_080),
+            session: claudeSession,
+            weekly: claudeWeekly,
             extras: [ExtraWindow(
                 name: "Fable weekly",
                 window: RateWindow(percent: 41, resetsAt: at(2.8 * 86400), windowMinutes: 10_080)
@@ -40,7 +65,7 @@ enum DemoData {
             account: "demo-claude",
             deviceLabel: "Demo-MacBookPro.local",
             // 수집 시각, 수집 상태까지 채운다, 비워두면 앱은 "상태 미상", 위젯은 낡은 스냅샷으로 그린다
-            collectedAt: at(-90)
+            collectedAt: claudeCollectedAt
         )
         let codex = Provider(
             id: "codex",
@@ -77,15 +102,36 @@ enum DemoData {
             burnRate: ActiveBlock.BurnRate(costPerHour: 3.57),
             projection: ActiveBlock.Projection(remainingMinutes: 192, totalCost: 17.85)
         )
+        // 한도에 막혀 있는 동안에는 Claude Code 5시간 블록도 생기지 않는다
+        let liveBlock: ActiveBlock? = quotaProtection ? nil : live
+
+        // 스트릭 보호 픽스처의 차단 구간. 그저께 밤부터 막혀 어제와 오늘을 모두 자정 전부터 덮고,
+        // 리셋은 내일 이후라 오늘 하루 전체를 덮는다. 보호 판정(ContentView)과 같은 달력을 쓴다.
+        var quotaBlocks: [QuotaBlock]? = nil
+        if quotaProtection {
+            let calendar = Calendar.current
+            let startOfYesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)) ?? now
+            quotaBlocks = [QuotaBlock(
+                providerId: "claude",
+                account: "demo-claude",
+                windowKind: "weekly",
+                resetAt: blockedWeeklyReset,
+                observedAccounts: ["demo-claude"],
+                firstSeenAt: iso.string(from: startOfYesterday.addingTimeInterval(-3 * 3600)),
+                lastSeenAt: at(-90),
+                clearedAt: nil
+            )]
+        }
 
         var device = CollectorDevice(
             id: "demo-device",
             label: "Demo-MacBookPro.local",
             lastSeenAt: at(-90),
-            collectStatus: ["claude": "ok", "codex": "ok", "gemini": "ok"]
+            collectStatus: ["claude": "ok", "codex": "ok", "gemini": "ok"],
+            // 버전을 비우면 설정 화면에 수집기 업데이트 안내가 떠 심사, 스크린샷에 그대로 찍힌다
+            collectorVersion: "0.2.0"
         )
         // Deterministic recovery fixtures, scoped to demo mode and this process.
-        let args = CommandLine.arguments
         if let i = args.firstIndex(of: "-charge-demo-collection-failures"),
            args.indices.contains(i + 1), let count = Int(args[i + 1]), count > 0 {
             let reasonIndex = args.firstIndex(of: "-charge-demo-collection-reason")
@@ -99,27 +145,32 @@ enum DemoData {
             var secondStatus = device.collectStatus
             if args.contains("-charge-demo-healthy-second-device") { secondStatus?["claude"] = "ok" }
             devices.append(CollectorDevice(id: "demo-second", label: "Demo-MacMini.local",
-                                           lastSeenAt: at(-90), collectStatus: secondStatus))
+                                           lastSeenAt: at(-90), collectStatus: secondStatus,
+                                           collectorVersion: "0.2.0"))
         }
 
         return UsagePayload(
             generatedAt: at(-90),
-            daily: dailyHistory(now: now),
-            live: live,
-            liveBlocks: [DeviceActiveBlock(
-                deviceId: device.id,
-                deviceLabel: device.shortLabel,
-                block: live,
-                collectedAt: at(-90)
-            )],
+            daily: dailyHistory(now: now, claudeBlockedDays: quotaProtection ? 2 : 0),
+            live: liveBlock,
+            liveBlocks: liveBlock.map { block in
+                [DeviceActiveBlock(
+                    deviceId: device.id,
+                    deviceLabel: device.shortLabel,
+                    block: block,
+                    collectedAt: at(-90)
+                )]
+            } ?? [],
             providers: args.contains("-charge-demo-no-claude-card") ? [codex, gemini] : [claude, codex, gemini],
-            devices: devices
+            devices: devices,
+            quotaBlocks: quotaBlocks
         )
     }
 
     /// 스트릭 그리드(10주 = 70일)를 꽉 채우는 일별 사용량 — 주중이 높고 주말이 낮은 패턴.
     /// 난수 대신 날짜 기반 결정적 값이라 스크린샷·심사 때마다 모양이 같다.
-    private static func dailyHistory(now: Date) -> [DailyUsage] {
+    /// claudeBlockedDays: 오늘부터 거슬러 이 일수만큼은 Claude 모델 사용이 없다(스트릭 보호 픽스처).
+    private static func dailyHistory(now: Date, claudeBlockedDays: Int = 0) -> [DailyUsage] {
         let calendar = Calendar(identifier: .gregorian)
         let days = ChargeDate.streakWeeks * 7
         return (0..<days).reversed().compactMap { back in
@@ -139,12 +190,18 @@ enum DemoData {
                                cacheCreationTokens: cached ? Int(cost * 12_000) : nil,
                                cacheReadTokens: cached ? Int(cost * 45_000) : nil)
             }
-            let models = cost <= 0 ? [] : [
+            var models = cost <= 0 ? [] : [
                 model("claude-fable-5", cost * 0.43),
                 model("claude-opus-5", cost * 0.19),
                 model("gpt-5.4-codex", cost * 0.27, cached: false),
                 model("gemini-3-pro", cost * 0.11, cached: false),
             ]
+            // 한도에 막힌 날에는 Claude를 쓰지 못했다. 다른 프로바이더 사용은 그대로 둬
+            // 전체 스트릭과 Codex, Gemini 스트릭은 이어진다.
+            if back < claudeBlockedDays {
+                models.removeAll { providerId(forModel: $0.modelName) == "claude" }
+                cost = models.reduce(0) { $0 + $1.cost }
+            }
             let tokens = Int(cost * 118_000)
             return DailyUsage(
                 period: ChargeDate.day.string(from: date),

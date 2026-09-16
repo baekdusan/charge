@@ -8,14 +8,21 @@ struct UsagePayload: Codable {
     var liveBlocks: [DeviceActiveBlock]? = nil
     let providers: [Provider]?
     let devices: [CollectorDevice]?
+    /// 서버가 지원하기 전 캐시/DB와도 디코딩되도록 optional. 빈 배열과 미지원(nil)은
+    /// 모두 "보호일을 단정하지 않음"으로 처리한다.
+    var quotaBlocks: [QuotaBlock]? = nil
 }
 
 enum ChargeError: LocalizedError {
     case notConfigured
+    /// 200이 아닌 응답. 상태 코드를 실어야 "그 컬럼이 없는 구버전 스키마(400대)"와
+    /// "지금 서버가 아프다(5xx, 게이트웨이)"를 구분해 폴백할지 정할 수 있다.
+    case http(status: Int)
 
     var errorDescription: String? {
         switch self {
         case .notConfigured: return String(localized: "Sign in to see your usage.")
+        case .http(let status): return String(localized: "Server error (\(status))")
         }
     }
 }
@@ -141,7 +148,8 @@ enum ChargeAPI {
 
     /// 새 백엔드는 기기별 원본 관측을 보존한다. payload는 수집기가 보낸 Provider 한 건이며
     /// 바깥 키들은 어느 기기가 언제 그 값을 보고했는지 나타낸다.
-    private struct ProviderObservationRow: Codable {
+    /// 병합 규칙이 이 릴리스의 회귀 지점이라 로직 테스트에서 직접 구성할 수 있게 열어 둔다.
+    struct ProviderObservationRow: Codable {
         let deviceId: String
         let providerId: String
         let account: String
@@ -186,14 +194,20 @@ enum ChargeAPI {
             "charge_provider_observations?select=*&order=provider_id.asc,last_reported_at.desc",
             bearer: jwt
         )
-        async let deviceRows: [CollectorDevice] = get(
+        // 앱이 서버 마이그레이션보다 먼저 배포돼도 전체 조회가 실패하지 않게 optional.
+        async let quotaRows: [QuotaBlock]? = optionalGet(
             cloud.url,
             cloud.anon,
-            "charge_devices?select=id,label,last_seen_at,collect_status&order=last_seen_at.desc.nullslast",
+            "charge_quota_blocks?select=provider_id,account,window_kind,reset_at,observed_accounts,first_seen_at,last_seen_at,cleared_at&reset_at=gte.\(since)T00:00:00Z&order=first_seen_at.asc",
             bearer: jwt
         )
+        // 이 조회만 실패해도 fetchAll 전체가 throw돼 캐시 없는 신규 설치는 빈 화면과 실패
+        // 문구만 남는다. 그렇다고 select=*로 받으면 token_hash까지 앱으로 내려오므로,
+        // 컬럼은 계속 나열하되 서버 마이그레이션이 배포보다 늦은 순간에는 구버전 목록으로
+        // 한 번 더 시도한다.
+        async let deviceRows: [CollectorDevice] = devices(cloud, jwt: jwt)
         // 디바이스별 live 중 만료 안 된 블록 하나 (여러 머신이 각자 보고).
-        // "가장 최근에 업로드한 행"이 아니라 "블록 시작이 가장 늦은 행"을 고른다 , 
+        // "가장 최근에 업로드한 행"이 아니라 "블록 시작이 가장 늦은 행"을 고른다.
         // 수집이 깨진 기기가 캐시된 옛 블록을 5분마다 재업로드하면 updated_at 기준으로는
         // 그 낡은 블록이 계속 이겨 최대 5시간 동안 live 게이지를 차지한다.
         let lives = try await liveRows
@@ -203,7 +217,13 @@ enum ChargeAPI {
                 let sa = a.activeBlock?.start ?? .distantPast
                 let sb = b.activeBlock?.start ?? .distantPast
                 if sa != sb { return sa > sb }
-                return (a.updatedDate ?? .distantPast) > (b.updatedDate ?? .distantPast)
+                let ua = a.updatedDate ?? .distantPast
+                let ub = b.updatedDate ?? .distantPast
+                if ua != ub { return ua > ub }
+                // 같은 시각에 시작된 블록끼리는 기기 id로 순서를 고정한다. 폴링마다 승자가
+                // 바뀌면 live 카드가 흔들리고, 위젯 지문도 매번 달라져 표시가 그대로인데
+                // 60초마다 리로드가 돈다.
+                return a.deviceId < b.deviceId
             }
         let selectedLive = activeLives.first
         let devices = try await deviceRows
@@ -227,14 +247,50 @@ enum ChargeAPI {
             providers: observations.map {
                 mergeProviderObservations($0, canonical: canonicalProviders, devices: devices)
             } ?? canonicalProviders,
-            devices: devices
+            devices: devices,
+            quotaBlocks: await quotaRows
+        )
+    }
+
+    /// 기기 목록. 토큰 해시 같은 비밀은 받지 않도록 컬럼을 나열하고, 서버에 아직 없는
+    /// 컬럼 때문에 400이 나면 한 단계씩 구버전 목록으로 내려가 다시 시도한다. 여기서 throw하면
+    /// 사용량 조회 전체가 함께 죽어 캐시 없는 신규 설치가 빈 화면이 된다.
+    private static func devices(_ cloud: (url: URL, anon: String), jwt: String) async throws -> [CollectorDevice] {
+        let order = "&order=last_seen_at.desc.nullslast"
+        // 새 컬럼일수록 앞에 둔다. collector_version은 수집기 자동 업데이트와 함께 추가됐고,
+        // collect_status는 그보다 먼저 추가됐다.
+        let columnSets = [
+            "id,label,last_seen_at,collect_status,collector_version",
+            "id,label,last_seen_at,collect_status",
+            "id,label,last_seen_at"
+        ]
+        for columns in columnSets.dropLast() {
+            do {
+                return try await get(
+                    cloud.url,
+                    cloud.anon,
+                    "charge_devices?select=\(columns)\(order)",
+                    bearer: jwt
+                )
+            } catch ChargeError.http(let status) where (400..<500).contains(status) {
+                // 없는 컬럼을 물으면 PostgREST가 400대로 답한다. 그때만 구버전 목록으로 재시도한다.
+                // 타임아웃이나 5xx까지 여기서 삼키면, 서버는 멀쩡한데 collect_status만 잃어
+                // 최신 수집기에도 "상태 미상" 안내가 뜨고 재로그인 경고가 사라진다.
+                continue
+            }
+        }
+        return try await get(
+            cloud.url,
+            cloud.anon,
+            "charge_devices?select=\(columnSets[columnSets.count - 1])\(order)",
+            bearer: jwt
         )
     }
 
     /// 같은 (provider, account)의 기기별 관측 중 실제 수집 시각이 가장 신선한 값을 카드로 삼는다.
     /// 아직 관측 테이블로 이행되지 않은 canonical 행도 합쳐, 오프라인 기기 데이터가 배포 순간
     /// 사라지지 않게 한다.
-    private static func mergeProviderObservations(
+    static func mergeProviderObservations(
         _ observations: [ProviderObservationRow],
         canonical: [Provider],
         devices: [CollectorDevice],
@@ -257,12 +313,18 @@ enum ChargeAPI {
         }
         func isRetired(_ row: ProviderObservationRow) -> Bool {
             guard let device = deviceByID[row.deviceId], device.isTracking(at: now),
-                  let reported = date(row.lastReportedAt), now.timeIntervalSince(reported) > 20 * 60,
-                  let statuses = device.collectStatus else { return false }
-            // 이 프로바이더 자체가 실패 중이면 마지막 정상 관측을 보존한다. 정상/낡음 또는
-            // 최신 수집기에서 항목 자체가 사라진 경우에만 이 기기의 옛 계정 관측을 은퇴시킨다.
-            guard let status = statuses[row.providerId] else { return true }
-            return !status.hasPrefix("error") && !status.hasPrefix("auth_expired")
+                  let reported = date(row.lastReportedAt), now.timeIntervalSince(reported) > 20 * 60
+            else { return false }
+            // 서버의 관측 은퇴 규칙과 같은 계약을 쓴다. 상태를 아예 모르는 구버전 수집기에서는
+            // 20분 규칙만으로 은퇴시킨다(여기서 보존하면 계정을 바꾼 뒤 유령 카드가 영구히 남는다).
+            guard device.providerStatuses != nil else { return true }
+            // 맵은 있는데 이 프로바이더 키가 없으면 "정상 수집했는데 사라졌다"가 아니라
+            // "이번엔 그 소스를 열거하지 못했다"일 수 있으므로 마지막 관측을 보존한다.
+            // ("_"로 시작하는 메타데이터 키는 프로바이더 상태로 읽지 않는다)
+            guard let status = device.status(for: row.providerId) else { return false }
+            // 이 프로바이더 자체가 실패 중이어도 마지막 정상 관측을 보존한다.
+            // "shared"(다른 기기가 같은 계정을 올려 건너뜀)는 ok와 같다, 이 기기의 옛 관측은 은퇴한다.
+            return !status.isIssue
         }
 
         let grouped = Dictionary(grouping: observations) { key($0.providerId, $0.account) }
@@ -272,18 +334,51 @@ enum ChargeAPI {
         for (groupKey, rows) in grouped {
             observationKeys.insert(groupKey)
             let active = rows.filter { !isRetired($0) }
-            guard let newest = active.max(by: { a, b in
-                let da = date(a.collectedAt) ?? date(a.lastReportedAt) ?? .distantPast
-                let db = date(b.collectedAt) ?? date(b.lastReportedAt) ?? .distantPast
-                return da < db
-            }) else { continue }
-            let observedDate = date(newest.collectedAt) ?? date(newest.lastReportedAt) ?? .distantPast
+            // 수집 시각과 업로드 시각은 다른 축이다. last_reported_at은 서버가 매 업로드마다
+            // now()로 갱신하므로, 수집 시각을 보내지 않는 구버전 수집기(0.1.4 이하)의 실효
+            // 시각은 언제나 "방금"이 된다. 두 축을 한 비교에 섞으면 그 기기가 항상 이겨
+            // 캐시 폴백의 몇 시간 묵은 값이 최신 관측을 밀어내고, 그 payload에는 수집 시각이
+            // 없어 나이 문구와 흐림까지 함께 꺼진다. 서버가 세워둔 신선도 가드와 같은 규칙으로
+            // 고른다: 스탬프가 신선하면 스탬프 없는 행은 후보가 아니다.
+            let stamped = active.compactMap { row -> (row: ProviderObservationRow, at: Date)? in
+                guard let at = date(row.collectedAt) else { return nil }
+                return (row, at)
+            }
+            let freshestStamped = stamped.max { $0.at < $1.at }
+            let newestUnstamped = active
+                .filter { date($0.collectedAt) == nil }
+                .max { (date($0.lastReportedAt) ?? .distantPast) < (date($1.lastReportedAt) ?? .distantPast) }
+
+            let newest: ProviderObservationRow
+            if let freshestStamped,
+               now.timeIntervalSince(freshestStamped.at) <= ChargeFreshness.supersedeAge {
+                newest = freshestStamped.row
+            } else if let newestUnstamped {
+                // 스탬프 있는 후보가 전부 묵었을 때만 시각 미상 관측이 자리를 가져간다.
+                newest = newestUnstamped
+            } else if let freshestStamped {
+                newest = freshestStamped.row
+            } else {
+                continue
+            }
+            let observedStamp = date(newest.collectedAt)
             // 순차 배포 중에는 아직 구버전 수집기만 canonical을 갱신할 수 있다. 그 값이 더
             // 신선하면 관측 테이블에 이미 키가 있다는 이유만으로 버리지 않는다.
+            // 여기서도 비교 축은 수집 시각 하나다. 시각을 아는 쪽이 모르는 쪽을 이긴다.
             let canonicalCandidate = canonicalByKey[groupKey]
-            let useCanonical = canonicalCandidate
-                .flatMap { date($0.collectedAt) }
-                .map { $0 > observedDate } ?? false
+            let canonicalStamp = canonicalCandidate.flatMap { date($0.collectedAt) }
+            let useCanonical: Bool = {
+                guard canonicalCandidate != nil else { return false }
+                switch (canonicalStamp, observedStamp) {
+                // 같은 스탬프면 canonical이 이긴다. 둘은 같은 업로드에서 나온 값인데
+                // canonical만 아직 리셋 전인 창을 보존하는 병합을 거친다(keep_session 등).
+                // 관측 payload는 이번에 수집된 창만 담은 원본이라, 동점에서 관측을 고르면
+                // 서버가 일부러 살려둔 세션 창이 앱과 위젯에서 통째로 사라진다.
+                case let (canonical?, observed?): return canonical >= observed
+                case (.some, nil): return true
+                case (nil, _): return false
+                }
+            }()
             let base = useCanonical ? canonicalCandidate! : newest.payload
             let sourceDeviceID = useCanonical ? canonicalCandidate?.deviceId : newest.deviceId
             var labels = active.compactMap { displayLabelByID[$0.deviceId] }
@@ -291,6 +386,17 @@ enum ChargeAPI {
                 labels.append(label)
             }
             labels.sort()
+            // 수집 시각을 모르는 구버전 관측이라도 그 기기가 마지막으로 업로드한 시각은
+            // 나이의 하한은 말해준다. 그대로 쓰면 캐시 폴백을 5분마다 올리는 기기가 "방금"으로
+            // 보이므로, 이미 낡음 경계를 넘었을 때만 채택한다. 며칠 꺼져 있던 PC의 스냅샷이
+            // 현재 상태처럼 밝게 그려지는 것만 막고, 살아 있는 기기는 그대로 나이 미상으로 둔다.
+            let reportedAgeFloor: String? = {
+                guard base.collectedAt == nil, newest.collectedAt == nil,
+                      let reported = date(newest.lastReportedAt),
+                      now.timeIntervalSince(reported) > ChargeFreshness.staleAge else { return nil }
+                return newest.lastReportedAt
+            }()
+            let collectedAt = base.collectedAt ?? newest.collectedAt ?? reportedAgeFloor
             resolved.append(Provider(
                 id: base.id,
                 name: base.name,
@@ -303,11 +409,18 @@ enum ChargeAPI {
                 deviceId: sourceDeviceID,
                 deviceLabel: sourceDeviceID.flatMap { displayLabelByID[$0] },
                 deviceLabels: labels,
-                collectedAt: base.collectedAt ?? newest.collectedAt
+                collectedAt: collectedAt,
+                // 업로드 시각은 나이의 하한일 뿐이다. 캐시를 5분마다 다시 올리는 구버전 기기는 늘 "방금"
+                // 올리므로, 그 시각을 수집 시각처럼 쓰면 몇 주 묵은 캐시가 시각을 아는 남의 카드를 밀어낸다.
+                // 표시 단계의 오래된 카드 정리가 둘을 구분할 수 있게 표시해 둔다.
+                collectedAtIsUploadFloor: reportedAgeFloor != nil ? true : nil
             ))
         }
         // 관측이 한 번도 생성되지 않은 키는 구버전/장기 오프라인 기기일 수 있으므로 보존한다.
         resolved.append(contentsOf: canonical.filter { !observationKeys.contains(key($0.id, $0.account)) })
+
+        // 오래된 카드는 여기서 빼지 않는다. 스트릭 보호의 계정 목록은 걸러지지 않은 목록을 봐야 하므로,
+        // 정리는 표시 단계(앱 카드, 위젯, 리셋 알림)에서 hidingOutdatedCards로 한다.
         return resolved.sorted { ($0.id, $0.account ?? "") < ($1.id, $1.account ?? "") }
     }
 
@@ -387,9 +500,8 @@ enum ChargeAPI {
         req.setValue(key, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(bearer ?? key)", forHTTPHeaderField: "Authorization")
         let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else {
-            throw URLError(.badServerResponse)
-        }
+        guard let http = resp as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard http.statusCode == 200 else { throw ChargeError.http(status: http.statusCode) }
         return try decoder.decode(T.self, from: data)
     }
 

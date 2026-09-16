@@ -1,0 +1,5 @@
+# 수집기가 자기 폴더에 남기는 상태 파일 (저장소에서 직접 돌렸을 때 커밋되지 않게)
+.claude-rate-limit.json*
+.claude-account.json*
+.update-check.json*
+.update-in-progress.json*

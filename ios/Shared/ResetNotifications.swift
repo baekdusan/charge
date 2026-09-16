@@ -120,19 +120,26 @@ enum ResetNotifications {
         enqueue { await performReschedule(providers: providers, warnThreshold: warnThreshold, sessionEpoch: sessionEpoch) }
     }
 
-    private static func performReschedule(providers: [Provider], warnThreshold: Double, sessionEpoch: Int) async {
-        // 데모 모드에선 예약하지 않고, 남아 있던 실계정 알림도 지운다 —
-        // 가짜 리셋 시각으로 울리거나 데모 중에 실계정 알림이 도착하면 안 된다
-        guard enabled, ChargeAuth.session != nil, !ChargeConfig.demoMode else {
-            performCancelAll()
-            return
-        }
-        // 다른 세션에서 얻은 데이터 — 예약도 취소도 하지 않는다 (다음 로드가 바로잡는다)
-        guard sessionEpoch == ChargeAuth.sessionEpoch else { return }
-        let center = UNUserNotificationCenter.current()
-        let old = storedIDs
-        var candidates: [(id: String, title: String, body: String, reset: Date)] = []
-        for p in providers where !mutedProviders.contains(p.id) {
+    /// 예약할 알림 한 건
+    struct PlannedAlert: Equatable {
+        let id: String
+        let title: String
+        let body: String
+        let reset: Date
+    }
+
+    /// 예약할 알림 목록. 시스템 알림 센터와 무관한 순수 계산이라 로직 테스트가 직접 부른다.
+    /// - 화면에서 뺀 오래된 카드(hidingOutdatedCards)의 창은 예약하지 않는다, 보이지 않는 카드의 알림은 설명이 안 된다.
+    /// - 리셋 시각이 이미 지난 창(수집 지연으로 남은 낡은 스냅샷)도 예약하지 않는다.
+    /// - iOS는 앱당 보류 알림을 64개까지만 유지한다, 초과분은 조용히 버려지므로 임박한 리셋부터 고른다.
+    static func plannedAlerts(
+        providers: [Provider],
+        warnThreshold: Double,
+        muted: Set<String>,
+        now: Date = Date()
+    ) -> [PlannedAlert] {
+        var candidates: [PlannedAlert] = []
+        for p in providers.hidingOutdatedCards(at: now) where !muted.contains(p.id) {
             var windows: [(slot: String, name: String, window: RateWindow)] = []
             if let s = p.session {
                 windows.append(("session", s.label ?? String(localized: "Session"), s))
@@ -146,8 +153,8 @@ enum ResetNotifications {
             for (slot, name, window) in windows {
                 guard window.percent >= warnThreshold,
                       let reset = window.resetDate,
-                      reset.timeIntervalSinceNow > 1 else { continue }
-                candidates.append((
+                      reset.timeIntervalSince(now) > 1 else { continue }
+                candidates.append(PlannedAlert(
                     id: "reset-\(p.uid)-\(slot)",
                     title: p.name,
                     body: String(localized: "\(name) limit just reset."),
@@ -155,9 +162,21 @@ enum ResetNotifications {
                 ))
             }
         }
-        // iOS는 앱당 보류 알림을 64개까지만 유지한다 — 초과분은 조용히 버려지므로
-        // 임박한 리셋부터 우선 예약한다
-        let planned = candidates.sorted { $0.reset < $1.reset }.prefix(64)
+        return Array(candidates.sorted { $0.reset < $1.reset }.prefix(64))
+    }
+
+    private static func performReschedule(providers: [Provider], warnThreshold: Double, sessionEpoch: Int) async {
+        // 데모 모드에선 예약하지 않고, 남아 있던 실계정 알림도 지운다 —
+        // 가짜 리셋 시각으로 울리거나 데모 중에 실계정 알림이 도착하면 안 된다
+        guard enabled, ChargeAuth.session != nil, !ChargeConfig.demoMode else {
+            performCancelAll()
+            return
+        }
+        // 다른 세션에서 얻은 데이터 — 예약도 취소도 하지 않는다 (다음 로드가 바로잡는다)
+        guard sessionEpoch == ChargeAuth.sessionEpoch else { return }
+        let center = UNUserNotificationCenter.current()
+        let old = storedIDs
+        let planned = plannedAlerts(providers: providers, warnThreshold: warnThreshold, muted: mutedProviders)
         let plannedIDs = planned.map(\.id)
         // 사라진 창의 예약을 먼저 제거해 슬롯을 비운다 — 64개가 찬 상태에서 추가부터 하면
         // 새 요청이 조용히 버려진다. 같은 id의 add는 기존 예약을 원자적으로 교체하므로
@@ -169,6 +188,10 @@ enum ResetNotifications {
         // add를 await로 완료시킨 뒤에야 id를 기록하고 재확인한다 — 미완료 add가
         // 로그아웃의 cancelAll 뒤에 수리되면 이전 계정의 알림이 남는다
         for c in planned {
+            // 앞선 add를 기다리는 사이 리셋이 지났을 수 있다. 지난 리셋은 예약하지 않는다
+            // (0 이하 간격의 트리거는 만들 수조차 없다)
+            let interval = c.reset.timeIntervalSinceNow
+            guard interval > 1 else { continue }
             let content = UNMutableNotificationContent()
             content.title = c.title
             content.body = c.body
@@ -177,7 +200,7 @@ enum ResetNotifications {
                 identifier: c.id,
                 content: content,
                 trigger: UNTimeIntervalNotificationTrigger(
-                    timeInterval: c.reset.timeIntervalSinceNow,
+                    timeInterval: interval,
                     repeats: false
                 )
             ))

@@ -73,9 +73,12 @@ struct ProviderEntry: TimelineEntry {
 private var sampleProviders: [Provider] { DemoData.payload.providers ?? [] }
 
 private func selectedProviders(_ providers: [Provider], selection: [ProviderEntity]) -> [Provider] {
-    // 앱 설정의 드래그 순서를 위젯에도 동일하게 적용한다 (숨김 목록은 한 번만 읽는다)
+    // 앱 설정의 드래그 순서를 위젯에도 동일하게 적용한다 (숨김 목록은 한 번만 읽는다).
+    // 오래된 카드 정리도 앱 카드와 같은 규칙이다, 페이로드 자체는 걸러지지 않은 목록을 싣는다.
     let hidden = ChargeConfig.hiddenProviders
-    let visible = ChargeConfig.sortedByUserOrder(providers.filter { !hidden.contains($0.id) })
+    let visible = ChargeConfig.sortedByUserOrder(
+        providers.hidingOutdatedCards().filter { !hidden.contains($0.id) }
+    )
     guard !selection.isEmpty else { return visible }
     let ids = Set(selection.map(\.id))
     return visible.filter { ids.contains($0.id) }
@@ -155,9 +158,37 @@ private func displayRows(_ provider: Provider, at now: Date) -> [ProviderRow] {
     return rows
 }
 
-/// 창이 없을 때 쓰는 표기, 숫자를 쓰는 순간 "한도를 안 썼다"는 단언이 된다
+private func limitStatusText(_ provider: Provider, at now: Date) -> String? {
+    guard let limit = provider.activeLimit(at: now) else { return nil }
+    let reached = limit.isProviderWide
+        ? "\(limit.title) · \(String(localized: "Limit reached"))"
+        : "\(limit.title) · \(String(localized: "Unavailable"))"
+    guard let reset = limit.window.resetShort else { return reached }
+    return "\(reached) · \(String(localized: "Resets in \(reset)"))"
+}
+
+/// 세션 0%여도 주간 100%가 막고 있으면 위젯의 대표 숫자는 주간 한도가 되어야 한다.
+/// 세션 창 자체가 없을 때 주간으로 내려가는 규칙까지 포함해 판정은 공유 모델이 한다,
+/// 잠금화면만 "No data"가 되는 모집단 불일치를 테스트로 잡을 수 있어야 하기 때문이다.
+private func primaryWindow(_ provider: Provider, at now: Date) -> ProviderRow? {
+    guard let primary = provider.primaryDisplayWindow(at: now) else { return nil }
+    return ProviderRow(id: primary.id, title: primary.title, window: primary.window)
+}
+
+private func compactRows(_ provider: Provider, at now: Date) -> [ProviderRow] {
+    if provider.providerWideLimit(at: now) != nil, let primary = primaryWindow(provider, at: now) {
+        return [primary]
+    }
+    return displayRows(provider, at: now)
+}
+
+/// 창이 없거나 값을 모를 때(묵은 스냅샷 + 리셋 시각 없음) 숫자 자리에 넣는 표기.
+/// 숫자를 쓰는 순간 "한도를 안 썼다"는 단언이 된다.
+/// 리터럴을 한 곳에만 두어 구두점 일괄 치환에 다시 휩쓸리지 않게 한다(쉼표로 바뀐 적이 있다).
+private let missingValueMark = "-"
+
 private func percentText(_ state: RateWindowDisplayState?) -> String {
-    guard let state else { return ", " }
+    guard let state, !state.isUnknown else { return missingValueMark }
     return "\(state.isEstimated ? "~" : "")\(Int(state.window.percent))%"
 }
 
@@ -197,9 +228,10 @@ private struct WidgetUsageGauge: View {
     var markerHeight: CGFloat = 9
 
     var body: some View {
-        let usage = min(1, max(0, state.window.percent / 100))
+        // 값을 모르는 창은 빈 트랙만 남긴다, 앱 카드 게이지와 같은 규칙
+        let usage = state.isUnknown ? 0 : min(1, max(0, state.window.percent / 100))
         let timeProgress = state.window.timeProgress
-        let isEstimated = state.isEstimated
+        let isEstimated = state.isEstimated || state.isUnknown
 
         GeometryReader { geometry in
             ZStack {
@@ -228,7 +260,7 @@ private struct WidgetUsageGauge: View {
         .blur(radius: isEstimated ? 0.35 : 0)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Usage")
-        .accessibilityValue("\(Int(state.window.percent)) percent")
+        .accessibilityValue(state.isUnknown ? Text("No recent data") : Text("\(Int(state.window.percent)) percent"))
     }
 }
 
@@ -241,17 +273,20 @@ private struct ProviderBar: View {
     var expanded = false
     /// 이 프로바이더의 스냅샷이 오래됐을 때, 추정값(isEstimated)과 같은 톤으로 낮춘다
     var stale = false
+    /// 다른 계정 전체 창이 이 0%/저사용 창보다 우선해 실제 사용을 막고 있는가
+    var unavailable = false
 
     var body: some View {
-        // 리셋 뒤 다음 창을 추정할 수 없는 창은 0%가 아니라 줄 자체를 생략한다
-        if let state = window.displayState(at: now) {
+        // 리셋 뒤 다음 창을 추정할 수 없는 창은 0%가 아니라 줄 자체를 생략한다.
+        // 묵은 스냅샷의 리셋 시각 없는 창은 줄은 두되 숫자 대신 값 미상으로 그린다(앱 카드와 같은 판정)
+        if let state = window.displayState(at: now, stale: stale) {
             VStack(alignment: .leading, spacing: expanded ? 3 : 1) {
                 HStack(spacing: 4) {
                     Text(title)
                         .font(expanded ? Font.caption : Font.caption2)
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    Text("\(Int(state.window.percent))%")
+                    Text(state.isUnknown ? missingValueMark : "\(Int(state.window.percent))%")
                         .font((expanded ? Font.caption : Font.caption2).monospacedDigit().bold())
                 }
                 WidgetUsageGauge(
@@ -262,13 +297,17 @@ private struct ProviderBar: View {
                     barHeight: expanded ? 6 : 4,
                     markerHeight: expanded ? 12 : 9
                 )
-                if expanded, let reset = state.window.resetShort {
+                if expanded, state.isUnknown {
+                    Text("No recent data")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                } else if expanded, let reset = state.window.resetShort {
                     Text("Resets in \(reset)")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
             }
-            .opacity(state.isEstimated || stale ? 0.62 : 1)
+            .opacity(state.isEstimated || stale || unavailable ? 0.62 : 1)
         }
     }
 }
@@ -304,8 +343,22 @@ private struct ProviderColumn: View {
                         .minimumScaleFactor(0.72)
                 }
             }
+            if let status = limitStatusText(provider, at: now) {
+                Label(status, systemImage: provider.providerWideLimit(at: now) == nil
+                      ? "exclamationmark.triangle.fill" : "lock.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(provider.providerWideLimit(at: now) == nil ? .orange : .red)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.68)
+            }
             ForEach(displayRows(provider, at: now)) { row in
-                ProviderBar(title: row.title, window: row.window, now: now, stale: stale)
+                ProviderBar(
+                    title: row.title,
+                    window: row.window,
+                    now: now,
+                    stale: stale,
+                    unavailable: provider.providerWideLimit(at: now) != nil && row.window.percent < 100
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -323,21 +376,32 @@ struct ProviderWidgetView: View {
         entry.providers.filter { !displayRows($0, at: now).isEmpty }
     }
 
-    /// 세션 창만 그리는 패밀리(바, 인라인)용, 세션이 없는 프로바이더는 그릴 것이 없다
-    private func sessionProviders(at now: Date) -> [Provider] {
-        entry.providers.filter { $0.session?.displayState(at: now) != nil }
+    /// 대표 숫자를 하나만 그리는 패밀리용. 계정 전체 차단 창이 있으면 세션보다 우선한다.
+    private func primaryProviders(at now: Date) -> [Provider] {
+        entry.providers.filter { primaryWindow($0, at: now) != nil }
     }
 
     private func mostUrgent(at now: Date) -> Provider? {
-        sessionProviders(at: now).max {
-            ($0.session?.displayState(at: now)?.window.percent ?? 0)
-                < ($1.session?.displayState(at: now)?.window.percent ?? 0)
+        let providers = primaryProviders(at: now)
+        if let blocked = providers.first(where: { $0.providerWideLimit(at: now) != nil }) {
+            return blocked
+        }
+        return providers.max {
+            urgency($0, at: now) < urgency($1, at: now)
         } ?? visibleProviders(at: now).first
+    }
+
+    /// 대표 창의 사용률. 값을 모르는 창은 0%보다도 낮게 쳐서, 아는 값이 있는 프로바이더가 대표가 된다.
+    private func urgency(_ provider: Provider, at now: Date) -> Double {
+        guard let primary = primaryWindow(provider, at: now),
+              let state = provider.displayState(of: primary.window, at: now),
+              !state.isUnknown else { return -1 }
+        return primary.window.percent
     }
 
     /// 흐림만으로는 "언제 것인지"를 못 말한다, 자리가 있는 패밀리에만 한 줄 덧붙인다.
     /// 지금 그려지고 있는 항목 중 가장 낡은 것 기준이고, 전부 신선하면 줄이 사라진다.
-    /// 그릴 창이 하나도 없어 "No data"로 가는 경우엔 걸러지기 전 목록으로 판정한다 , 
+    /// 그릴 창이 하나도 없어 "No data"로 가는 경우엔 걸러지기 전 목록으로 판정한다.
     /// 수집기가 몇 시간 죽어 있으면 창이 전부 사라지는데(리셋 추정도 못 하는 상태),
     /// 그때 앱 카드는 나이를 말하는데 위젯만 "No data"로 침묵하는 게 최악이다.
     @ViewBuilder
@@ -412,14 +476,23 @@ struct ProviderWidgetView: View {
                             .minimumScaleFactor(0.55)
                     }
                 }
-                ForEach(displayRows(only, at: now)) { row in
+                if let status = limitStatusText(only, at: now) {
+                    Label(status, systemImage: only.providerWideLimit(at: now) == nil
+                          ? "exclamationmark.triangle.fill" : "lock.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(only.providerWideLimit(at: now) == nil ? .orange : .red)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.64)
+                }
+                ForEach(compactRows(only, at: now)) { row in
                     Spacer(minLength: 2)
                     ProviderBar(
                         title: row.title,
                         window: row.window,
                         now: now,
                         expanded: true,
-                        stale: isStale(only, at: now)
+                        stale: isStale(only, at: now),
+                        unavailable: only.providerWideLimit(at: now) != nil && row.window.percent < 100
                     )
                 }
             } else {
@@ -463,9 +536,10 @@ struct ProviderWidgetView: View {
     @ViewBuilder
     private func circularView(at now: Date) -> some View {
         let provider = mostUrgent(at: now)
-        let state = provider?.session?.displayState(at: now)
-        // 세션 창이 없으면 링을 비운 채 ", ", 0%로 채우면 "한도를 안 썼다"고 말하게 된다
-        let text = percentText(state)
+        let blocked = provider?.providerWideLimit(at: now) != nil
+        let state = provider.flatMap { p in primaryWindow(p, at: now).flatMap { p.displayState(of: $0.window, at: now) } }
+        // 대표 창이 없으면 링을 비운 채 자리표시자만 둔다. 0%로 채우면 "한도를 안 썼다"고 말하게 된다
+        let text = blocked ? String(localized: "MAX") : percentText(state)
         // 한 프로바이더만 그리는 패밀리라 신선도도 그 프로바이더 것만 본다
         let dimmed = state?.isEstimated == true || (provider.map { isStale($0, at: now) } ?? false)
 
@@ -481,7 +555,7 @@ struct ProviderWidgetView: View {
             }
             .opacity(dimmed ? 0.58 : 1)
         default:
-            Gauge(value: state.map { min($0.window.percent, 100) } ?? 0, in: 0...100) {
+            Gauge(value: state.map { $0.isUnknown ? 0 : min($0.window.percent, 100) } ?? 0, in: 0...100) {
                 ProviderGlyph(providerId: provider?.id ?? "", name: provider?.name ?? "-")
                     .frame(width: 12, height: 12)
             } currentValueLabel: {
@@ -505,15 +579,16 @@ struct ProviderWidgetView: View {
     }
 
     private func lockBarsView(at now: Date) -> some View {
-        // 세션 창이 있는 프로바이더만, 창이 없는 줄은 0%로 그리는 대신 빼버린다
-        let providers = Array(sessionProviders(at: now).prefix(2))
+        // 계정 전체 차단이면 세션 0% 대신 실제 차단 창을 대표 막대로 쓴다.
+        let providers = Array(primaryProviders(at: now).prefix(2))
 
         return VStack(alignment: .leading, spacing: 5) {
             if providers.isEmpty {
                 Text("No data").font(.caption2)
             } else {
                 ForEach(providers, id: \.uid) { provider in
-                    if let state = provider.session?.displayState(at: now) {
+                    if let primary = primaryWindow(provider, at: now),
+                       let state = provider.displayState(of: primary.window, at: now) {
                         VStack(alignment: .leading, spacing: 1) {
                             HStack(spacing: 6) {
                                 ProviderGlyph(providerId: provider.id, name: provider.name)
@@ -522,7 +597,8 @@ struct ProviderWidgetView: View {
                                     .font(.caption2.bold())
                                     .lineLimit(1)
                                 Spacer(minLength: 4)
-                                Text("\(Int(state.window.percent))%")
+                                Text(provider.providerWideLimit(at: now) != nil ? String(localized: "MAX")
+                                     : state.isUnknown ? missingValueMark : "\(Int(state.window.percent))%")
                                     .font(.caption2.monospacedDigit())
                             }
                             WidgetUsageGauge(
@@ -547,8 +623,8 @@ struct ProviderWidgetView: View {
 
     private func lockSummaryView(at now: Date) -> some View {
         let provider = mostUrgent(at: now)
-        let session = provider?.session?.displayState(at: now)
-        let weekly = provider?.weekly?.displayState(at: now)
+        let session = provider.flatMap { p in p.session.flatMap { p.displayState(of: $0, at: now) } }
+        let weekly = provider.flatMap { p in p.weekly.flatMap { p.displayState(of: $0, at: now) } }
         // 한 프로바이더의 세션, 주간을 나란히 보여주는 패밀리, 둘 다 그 프로바이더의 신선도를 따른다
         let stale = provider.map { isStale($0, at: now) } ?? false
 
@@ -561,6 +637,11 @@ struct ProviderWidgetView: View {
                         Text(provider.name)
                             .font(.caption.bold())
                             .lineLimit(1)
+                        if provider.providerWideLimit(at: now) != nil {
+                            Image(systemName: "lock.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
                     }
                     Spacer(minLength: 3)
                     if let plan = provider.plan, !plan.isEmpty {
@@ -600,7 +681,7 @@ struct ProviderWidgetView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            // 창이 없으면 ", " (0%가 아니다). 묵은 스냅샷이면 숫자를 흐리게 낮춘다
+            // 창이 없으면 자리표시자를 쓴다(0%가 아니다). 묵은 스냅샷이면 숫자를 흐리게 낮춘다
             Text(percentText(state))
                 .font(.system(.title3, design: .rounded).bold().monospacedDigit())
                 .lineLimit(1)
@@ -611,16 +692,21 @@ struct ProviderWidgetView: View {
     }
 
     private func inlineView(at now: Date) -> some View {
-        // 세션 창이 없는 프로바이더는 이름만 남기는 대신 아예 빼고, 하나도 없으면 빈 상태 문구로 간다
-        let shown = entry.providers.filter { $0.session?.displayState(at: now) != nil }.prefix(2)
+        // 대표 창이 없는 프로바이더는 이름만 남기는 대신 아예 빼고, 하나도 없으면 빈 상태 문구로 간다
+        let shown = primaryProviders(at: now).prefix(2)
         // accessoryInline은 시스템이 날짜 옆 한 줄을 고정 스타일로 그려서 .opacity가 먹지 않는다.
         // 게다가 줄 전체를 낮추면 옆에서 정상 수집 중인 프로바이더까지 같이 낡아 보인다.
         // 그래서 신호를 텍스트 표현 자체에 싣는다, 묵은 값 앞에만 별표를 붙인다.
         // (빼버리는 쪽은 택하지 않았다: 잠금화면에서 이름이 사라지면 "그 프로바이더는 멀쩡하다"로 읽힌다.
         //  물결표는 이미 리셋 추정값 표시라 겹치지 않게 별표를 쓴다, "*34%"는 추정 아닌 묵은 값이다.)
         let parts = shown.map { p in
-            let mark = isStale(p, at: now) ? "*" : ""
-            return "\(p.name) \(mark)\(percentText(p.session?.displayState(at: now)))"
+            if p.providerWideLimit(at: now) != nil {
+                return "\(p.name) \(String(localized: "Limit reached"))"
+            }
+            let state = primaryWindow(p, at: now).flatMap { p.displayState(of: $0.window, at: now) }
+            // 값 미상이면 자리표시자만 쓴다, 별표는 "묵은 숫자"라는 뜻이라 숫자가 없으면 붙이지 않는다
+            let mark = isStale(p, at: now) && state?.isUnknown != true ? "*" : ""
+            return "\(p.name) \(mark)\(percentText(state))"
         }
 
         return Text(parts.isEmpty ? String(localized: "No data") : parts.joined(separator: " | "))

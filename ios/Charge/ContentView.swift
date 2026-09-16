@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var liveBlocks: [DeviceActiveBlock] = []
     @State private var providers: [Provider] = []
     @State private var devices: [CollectorDevice] = []
+    @State private var quotaBlocks: [QuotaBlock] = []
     @State private var generatedAt: Date?
     @State private var error: String?
     @State private var loading = false
@@ -90,6 +91,7 @@ struct ContentView: View {
                         liveBlocks = []
                         providers = []
                         devices = []
+                        quotaBlocks = []
                         generatedAt = nil
                         error = String(localized: "Sign in to see your usage.")
                         showOnboarding = true
@@ -134,7 +136,7 @@ struct ContentView: View {
                 VStack(spacing: 12) {
                     connectionStatus(at: context.date)
                     ForEach(recoverySuggestions(at: context.date)) { suggestion in
-                        collectionRecoveryCard(suggestion)
+                        collectionRecoveryCard(suggestion, now: context.date)
                     }
                 }
             }
@@ -193,8 +195,10 @@ struct ContentView: View {
         today?.cost(for: p.id) ?? 0
     }
 
+    /// 화면에 그릴 카드. 오래된 카드 정리(hidingOutdatedCards)는 여기서만 한다,
+    /// `providers` 자체는 스트릭 보호의 계정 목록이 쓰도록 걸러지지 않은 채로 둔다.
     private var visibleProviders: [Provider] {
-        providers.filter { !hidden.contains($0.id) }
+        providers.hidingOutdatedCards().filter { !hidden.contains($0.id) }
     }
 
     /// Visibility is a local preference. Apply it immediately, including the
@@ -280,19 +284,24 @@ struct ContentView: View {
                     .font(.caption.weight(.semibold))
                 ForEach(issues) { issue in
                     VStack(alignment: .leading, spacing: 1) {
-                        if issue.needsSetup {
+                        // 확인된 Claude 로그인 문제는 문턱 없이 바로 "확인 필요"다(기다려도 낫지 않는다).
+                        // 요청 제한과 그 밖의 오류는 5회, 20분 문턱을 넘기 전까지 "다시 확인 중"이다.
+                        switch issue.headline(lastAttempt: device.lastSeenDate) {
+                        case .setup:
                             Text("Check \(issue.providerName) setup on this PC")
-                        } else if issue.isPersistent(lastAttempt: device.lastSeenDate) {
+                        case .needsAttention:
                             Text("\(issue.providerName) usage needs attention")
-                        } else if issue.consecutiveFailures != nil {
+                        case .retrying:
                             Text("Retrying \(issue.providerName) usage")
-                        } else {
+                        case .unreadable:
                             // Older collectors have no failure count; don't invent one.
                             Text("Charge can't read \(issue.providerName) usage on this PC")
-                            if issue.isAuthExpired {
-                                Text("Try signing in again in \(issue.providerName)")
-                                    .foregroundStyle(.secondary)
-                            }
+                        }
+                        // 만료는 "Claude Code를 한 번 여세요", 폐기는 "다시 로그인", 요청 제한은 다음 시도 시각.
+                        // 실패 횟수가 붙는 새 수집기에서도 사용자가 할 일은 같으므로 항상 붙인다.
+                        if !issue.needsSetup, let hint = issue.actionHint(at: now) {
+                            Text(hint)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     .font(.caption2)
@@ -344,15 +353,14 @@ struct ContentView: View {
             device.visibleCollectIssues(hidden: hidden).compactMap { issue -> RecoverySuggestion? in
                 guard issue.needsSetup || issue.isPersistent(lastAttempt: device.lastSeenDate),
                       seen.insert(issue.providerId).inserted else { return nil }
-                let healthy = devices.contains {
-                    $0.isTracking(at: now) && $0.collectStatus?[issue.providerId] == "ok"
-                }
+                // 다른 기기가 ok를 보낼 때만 정상이다. shared는 수집하지 않은 기기라 세지 않는다(hasHealthyPeer 참고).
+                let healthy = device.hasHealthyPeer(for: issue.providerId, among: devices, at: now)
                 return RecoverySuggestion(device: device, issue: issue, hasHealthyDevice: healthy)
             }
         }
     }
 
-    private func collectionRecoveryCard(_ suggestion: RecoverySuggestion) -> some View {
+    private func collectionRecoveryCard(_ suggestion: RecoverySuggestion, now: Date) -> some View {
         let issue = suggestion.issue
         return VStack(alignment: .leading, spacing: 10) {
             Label("Check \(issue.providerName) usage", systemImage: "exclamationmark.circle")
@@ -363,12 +371,14 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            if !issue.needsSetup, let count = issue.consecutiveFailures {
-                Text("\(count) consecutive attempts failed over at least 20 minutes.")
+            // 횟수는 말하지 않는다. 수집기는 요청을 보내지 않은 사이클(만료 사전 확인, 요청 제한 대기)도
+            // 연속 실패로 세므로 "N회 연속 실패"는 보내지 않은 요청까지 실패로 센다. 지속 시간만은 늘 참이다.
+            if !issue.needsSetup, let duration = issue.failingDuration(lastAttempt: suggestion.device.lastSeenDate) {
+                Text("Usage couldn't be collected for at least \(CollectorDevice.CollectIssue.atLeastDurationText(duration)).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text(issue.guidance)
+            Text(issue.guidance(at: now))
                 .font(.footnote)
             if suggestion.hasHealthyDevice {
                 Text("Another PC is reporting this provider normally. Check the PC shown above.")
@@ -404,16 +414,39 @@ struct ContentView: View {
 
     // MARK: 스트릭 (잔디)
 
+    /// 프로바이더 스트릭은 현재 관측 중인 모든 계정이 하루 전체 차단된 경우에만 보호한다.
+    /// 계정 하나라도 사용 가능했거나 서버가 차단 이력을 모르면 보호하지 않는 보수적 규칙이다.
+    private func protectedPeriods(for pid: String?) -> Set<String> {
+        guard let pid else { return [] } // 전체 스트릭은 특정 프로바이더 한도 때문에 보호하지 않는다
+        // 화면용 정리(오래된 카드 숨김) 전의 목록을 쓴다. 카드가 가려졌다고 그 계정이 사라진 것은 아니다.
+        let accounts = Set(providers.filter { $0.id == pid }.map { $0.account ?? "" })
+        return StreakProtection.protectedPeriods(
+            providerId: pid,
+            accounts: accounts,
+            blocks: quotaBlocks
+        )
+    }
+
     private func streak(for pid: String?) -> Int {
         let costByDay = Dictionary(uniqueKeysWithValues: daily.map { ($0.period, $0.cost(for: pid)) })
+        let protected = protectedPeriods(for: pid)
         var count = 0
         var cursor = Date()
-        // 오늘 기록이 없으면 어제부터 센다
-        if (costByDay[ChargeDate.day.string(from: cursor)] ?? 0) <= 0 {
+        // 오늘은 아직 끝나지 않았으므로 기록도 보호도 없으면 어제부터 센다.
+        // 보호일은 건너뛰되 활동일처럼 count를 올리지는 않는다.
+        let todayPeriod = ChargeDate.day.string(from: cursor)
+        if (costByDay[todayPeriod] ?? 0) <= 0 && !protected.contains(todayPeriod) {
             cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor)!
         }
-        while (costByDay[ChargeDate.day.string(from: cursor)] ?? 0) > 0 {
-            count += 1
+        var scanned = 0
+        while scanned < 120 {
+            let period = ChargeDate.day.string(from: cursor)
+            if (costByDay[period] ?? 0) > 0 {
+                count += 1
+            } else if !protected.contains(period) {
+                break
+            }
+            scanned += 1
             cursor = Calendar.current.date(byAdding: .day, value: -1, to: cursor)!
         }
         return count
@@ -426,6 +459,8 @@ struct ContentView: View {
         let start = Calendar.current.date(byAdding: .day, value: -(weeks * 7 - 1), to: Date())!
         let maxCost = max(costByDay.values.max() ?? 0, 0.01)
         let todayRatio = (today?.cost(for: pid) ?? 0) / maxCost
+        let protected = protectedPeriods(for: pid)
+        let todayProtected = protected.contains(ChargeDate.todayString())
 
         return VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -441,17 +476,35 @@ struct ContentView: View {
                     VStack(spacing: 4) {
                         ForEach(0..<7, id: \.self) { row in
                             let date = Calendar.current.date(byAdding: .day, value: col * 7 + row, to: start)!
-                            let cost = costByDay[f.string(from: date)] ?? 0
+                            let period = f.string(from: date)
+                            let cost = costByDay[period] ?? 0
+                            let isProtected = cost <= 0 && protected.contains(period)
                             let future = date > Date()
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(future ? .clear
-                                      : cost <= 0 ? Color.white.opacity(0.07)
-                                      : ChargeTheme.accent.opacity(max(0.18, cost / maxCost)))
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(future ? .clear
+                                          : isProtected ? Color.blue.opacity(0.32)
+                                          : cost <= 0 ? Color.white.opacity(0.07)
+                                          : ChargeTheme.accent.opacity(max(0.18, cost / maxCost)))
+                                if isProtected && !future {
+                                    Image(systemName: "shield.fill")
+                                        .font(.system(size: 5, weight: .bold))
+                                        .foregroundStyle(Color.blue.opacity(0.95))
+                                }
+                            }
                                 .frame(maxWidth: .infinity)
                                 .aspectRatio(1, contentMode: .fit)
+                                .accessibilityLabel(isProtected
+                                    ? String(localized: "Streak protected")
+                                    : period)
                         }
                     }
                 }
+            }
+            if todayProtected {
+                Label("Streak protected today", systemImage: "shield.fill")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.blue)
             }
             if (today?.cost(for: pid) ?? 0) > 0 {
                 Text(String(format: String(localized: "today_peak_ratio"), Int(min(todayRatio, 1) * 100)))
@@ -465,6 +518,7 @@ struct ContentView: View {
     private func providerCard(_ p: Provider, duplicates: Set<String>) -> some View {
         // 나이 문구와 게이지 톤은 같은 판정을 봐야 한다, 한 번만 재서 둘 다에 넘긴다
         let freshness = p.freshness()
+        let providerLimit = p.providerWideLimit()
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
@@ -509,27 +563,74 @@ struct ContentView: View {
                     .foregroundStyle(.orange)
             }
             collectionAgeLine(freshness)
-            if let state = p.session?.displayState() {
+            availabilityBanner(p, freshness: freshness)
+            // 창 표시 상태도 같은 신선도 판정으로 만든다: 묵은 스냅샷의 리셋 시각 없는 창은 값 미상
+            if let state = p.session?.displayState(stale: freshness.isStale) {
                 gaugeRow(
                     title: p.session?.label ?? String(localized: "Session"),
                     state: state,
-                    stale: freshness.isStale
+                    stale: freshness.isStale,
+                    unavailable: providerLimit != nil && state.window.percent < 100
                 )
             }
-            if let state = p.weekly?.displayState() {
+            if let state = p.weekly?.displayState(stale: freshness.isStale) {
                 gaugeRow(
                     title: p.weekly?.label ?? String(localized: "Weekly"),
                     state: state,
-                    stale: freshness.isStale
+                    stale: freshness.isStale,
+                    unavailable: providerLimit != nil && state.window.percent < 100
                 )
             }
             ForEach(p.extras ?? []) { e in
-                if let state = e.window.displayState() {
-                    gaugeRow(title: e.window.label ?? e.name, state: state, stale: freshness.isStale)
+                if let state = e.window.displayState(stale: freshness.isStale) {
+                    gaugeRow(
+                        title: e.window.label ?? e.name,
+                        state: state,
+                        stale: freshness.isStale,
+                        unavailable: providerLimit != nil && state.window.percent < 100
+                    )
                 }
             }
         }
         .cardStyle()
+    }
+
+    /// 게이지 중 하나만 보지 않고 계정 전체 차단을 카드의 첫 상태로 말한다.
+    /// 모델별 extras 100%는 "Claude 전체 사용 불가"로 과장하지 않고 범위를 이름에 남긴다.
+    @ViewBuilder
+    private func availabilityBanner(_ provider: Provider, freshness: CollectionFreshness) -> some View {
+        TimelineView(.periodic(from: .now, by: 60)) { context in
+            if let limit = provider.activeLimit(at: context.date) {
+                let title = limit.isProviderWide
+                    ? String(localized: "Unavailable · \(limit.title) limit reached")
+                    : String(localized: "\(limit.title) unavailable")
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: limit.isProviderWide ? "lock.fill" : "exclamationmark.triangle.fill")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title)
+                            .font(.caption.bold())
+                        if freshness.isStale {
+                            Text("Last checked status")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else if let reset = limit.resetDate {
+                            Text("Available \(reset.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Reset time unavailable")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(limit.isProviderWide ? .red : .orange)
+                .padding(9)
+                .background((limit.isProviderWide ? Color.red : Color.orange).opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityElement(children: .combine)
+            }
+        }
     }
 
     /// 수집된 지 오래된 스냅샷, 게이지가 현재 상태가 아닐 수 있음을 알린다.
@@ -538,7 +639,7 @@ struct ContentView: View {
     @ViewBuilder
     private func collectionAgeLine(_ freshness: CollectionFreshness) -> some View {
         if freshness.isStale {
-            // 시각이 비상식적이면(미래, 30일 초과) 나이 대신 "오래된 데이터"라고만 한다 , 
+            // 시각이 비상식적이면(미래, 30일 초과) 나이 대신 "오래된 데이터"라고만 한다.
             // 침묵하면 가장 낡은 데이터가 오히려 아무 경고 없이 정상으로 읽힌다
             let relative = freshness.ageDate?.formatted(
                 .relative(presentation: .numeric, unitsStyle: .abbreviated)
@@ -552,7 +653,12 @@ struct ContentView: View {
 
     /// stale: 이 프로바이더의 스냅샷이 묵었을 때, 위젯과 같은 톤으로 게이지를 낮춘다.
     /// 임계값만 공유하고 처리가 갈리면(위젯은 흐리게, 앱은 밝게) 같은 데이터가 두 곳에서 다르게 읽힌다.
-    private func gaugeRow(title: String, state: RateWindowDisplayState, stale: Bool = false) -> some View {
+    private func gaugeRow(
+        title: String,
+        state: RateWindowDisplayState,
+        stale: Bool = false,
+        unavailable: Bool = false
+    ) -> some View {
         let window = state.window
 
         return VStack(alignment: .leading, spacing: 4) {
@@ -574,46 +680,63 @@ struct ContentView: View {
             }
             if window.timeProgress != nil {
                 TimelineView(.periodic(from: .now, by: 60)) { _ in
-                    usageGauge(window, isEstimated: state.isEstimated, stale: stale)
+                    usageGauge(window, isEstimated: state.isEstimated, stale: stale, unknown: state.isUnknown)
                 }
             } else {
-                usageGauge(window, isEstimated: state.isEstimated, stale: stale)
+                usageGauge(window, isEstimated: state.isEstimated, stale: stale, unknown: state.isUnknown)
             }
             HStack(spacing: 3) {
-                Text("\(Int(window.percent))%")
-                    .font(.caption.monospacedDigit())
-                if state.isEstimated {
-                    Text("estimated")
+                if state.isUnknown {
+                    // 묵은 스냅샷에 리셋 시각도 없다, 그 사이 창이 어떻게 됐는지 모르므로 숫자를 쓰지 않는다
+                    Text("No recent data")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    Spacer()
                 } else {
-                    Text("used")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text("\(Int(window.percent))%")
+                        .font(.caption.monospacedDigit())
+                        // 막대만 흐리고 숫자가 밝으면 숫자가 현재 값처럼 읽힌다
+                        .foregroundStyle(stale ? .secondary : .primary)
+                    if state.isEstimated {
+                        Text("estimated")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        Text("used")
+                            .font(.caption)
+                            .foregroundStyle(stale ? .tertiary : .secondary)
+                    }
+                    Spacer()
                 }
-                Spacer()
-                if !state.isEstimated, window.percent >= 100 {
+                if !state.isUnknown, !state.isEstimated, window.percent >= 100 {
                     Text("Limit reached")
                         .font(.caption.bold())
                         .foregroundStyle(.red)
-                } else if !state.isEstimated, let eta = window.projectedExhaustion {
+                } else if let eta = state.paceWarning {
                     Text("⚡ On pace to run out in \(paceShort(eta))")
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
         }
+        .opacity(unavailable ? 0.52 : 1)
     }
 
-    private func usageGauge(_ window: RateWindow, isEstimated: Bool, stale: Bool = false) -> some View {
-        let usage = min(1, max(0, window.percent / 100))
+    private func usageGauge(
+        _ window: RateWindow,
+        isEstimated: Bool,
+        stale: Bool = false,
+        unknown: Bool = false
+    ) -> some View {
+        // 값을 모르는 창은 채우지 않은 빈 트랙만 그린다(0%로 채운 막대와 구분되도록 흐리게)
+        let usage = unknown ? 0 : min(1, max(0, window.percent / 100))
         let timeProgress = window.timeProgress
         let tint: Color = window.percent >= critThreshold ? .red
             : window.percent >= warnThreshold ? .orange
             : .green
         // 추정값이든 묵은 스냅샷이든 "지금 상태가 아니다"는 같은 말이라 시각 처리를 하나로 쓴다
         // (낡음은 바로 위 나이 문구가 별도 요소로 읽히므로 접근성 라벨은 건드리지 않는다)
-        let faded = isEstimated || stale
+        let faded = isEstimated || stale || unknown
 
         return GeometryReader { geo in
             ZStack {
@@ -642,7 +765,7 @@ struct ContentView: View {
         .frame(height: 10)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(isEstimated ? "Estimated usage" : "Usage")
-        .accessibilityValue("\(Int(window.percent)) percent")
+        .accessibilityValue(unknown ? Text("No recent data") : Text("\(Int(window.percent)) percent"))
     }
 
     private func paceShort(_ d: Date) -> String {
@@ -781,6 +904,7 @@ struct ContentView: View {
             // (설정 시트에서 순서를 바꾸면 onDismiss의 load()가 다시 반영한다)
             providers = ChargeConfig.sortedByUserOrder(payload.providers ?? [])
             devices = payload.devices ?? []
+            quotaBlocks = payload.quotaBlocks ?? []
             payloadEpoch = epoch
             ChargeConfig.rememberProviders(providers)
             // 숨긴 프로바이더는 알림도 받지 않는다 — 예약 시점의 공유 저장소 설정으로 거른다.
@@ -814,6 +938,7 @@ struct ContentView: View {
             liveBlocks = []
             providers = []
             devices = []
+            quotaBlocks = []
             generatedAt = nil
             self.error = String(localized: "Sign in to see your usage.")
             showOnboarding = true
@@ -831,6 +956,7 @@ struct ContentView: View {
                 liveBlocks = []
                 providers = []
                 devices = []
+                quotaBlocks = []
                 generatedAt = nil
             }
         }

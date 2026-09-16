@@ -67,7 +67,9 @@ final class CollectionRecoveryTests: XCTestCase {
         let hide = app.buttons["hideProvider-claude"]
         XCTAssertTrue(hide.waitForExistence(timeout: 10))
         XCTAssertEqual(app.buttons.matching(identifier: "hideProvider-claude").count, 1)
-        XCTAssertTrue(app.staticTexts["5 consecutive attempts failed over at least 20 minutes."].exists)
+        // 요청을 보내지 않은 사이클도 연속 실패로 세므로 횟수 대신 지속 시간만 말한다
+        XCTAssertTrue(app.staticTexts["Usage couldn't be collected for at least 20 minutes."].exists)
+        XCTAssertFalse(app.staticTexts["5 consecutive attempts failed over at least 20 minutes."].exists)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = "Persistent Claude usage failure"
         screenshot.lifetime = .keepAlways
