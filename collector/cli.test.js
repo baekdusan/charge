@@ -358,7 +358,10 @@ test("CLI installRuntime backs up to app.prev and swaps through .new with collec
       "  .catch((e) => { console.error(e); process.exit(2); });",
     ].join("\n"));
     const killed = spawnSync(process.execPath, [killer], { encoding: "utf8", env: install.env, timeout: 60_000 });
-    assert.equal(killed.status, null, killed.stderr);
+    // POSIX에서는 시그널로 죽어 status가 null이다. 시그널이 없는 Windows에서는 process.kill이 종료 코드 1로 끝낸다.
+    // 어느 쪽이든 설치가 정상 종료(0)하거나 오류 경로(2)로 빠진 것이 아니어야 한다
+    if (process.platform === "win32") assert.equal(killed.status, 1, killed.stderr);
+    else assert.equal(killed.status, null, killed.stderr);
     const { id, startedAt, ...marker } = JSON.parse(fs.readFileSync(path.join(appDir, U.UPDATE_MARKER), "utf8"));
     assert.deepEqual(marker, {
       backup: backupDir, files: INSTALL_ORDER, added: ["install.linux.sh", "install.ps1", "cloud.json"],
