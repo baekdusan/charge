@@ -41,9 +41,12 @@ jobs:
           node -e "const p=require('path');console.log('CONF_DIR =', p.join(process.env.HOME ?? process.env.USERPROFILE, '.charge'))"
 
       # ── 1. 유닛 테스트 ────────────────────────────────────────────────
-      - name: collect.test.js
+      # package.json의 test 스크립트 전체(수집, CLI, 자동 업데이터, 매니페스트 서명)를 돌린다.
+      # 업데이터의 파일 교체 재시도, 강제 종료 복구, 잠금 경쟁은 OS마다 동작이 달라 여기서 확인해야 한다.
+      - name: npm test
         working-directory: collector
-        run: node --test collect.test.js
+        timeout-minutes: 15
+        run: npm test
 
       # ── 2. CLI 진입점 ────────────────────────────────────────────────
       - name: cli.js — 인자 없이 실행하면 사용법 + exit 1
@@ -264,9 +267,12 @@ jobs:
         with:
           node-version: '22'
 
-      - name: collect.test.js
+      # package.json의 test 스크립트 전체(수집, CLI, 자동 업데이터, 매니페스트 서명)를 돌린다.
+      # 업데이터의 파일 교체 재시도, 강제 종료 복구, 잠금 경쟁은 OS마다 동작이 달라 여기서 확인해야 한다.
+      - name: npm test
         working-directory: collector
-        run: node --test collect.test.js
+        timeout-minutes: 15
+        run: npm test
 
       # 경로에 공백을 넣어 돌린다 — systemd 는 ExecStart 를 공백으로 쪼개므로
       # 인용이 빠지면 --log 인자가 두 동강 난다.
@@ -326,3 +332,20 @@ jobs:
         env:
           CHARGE_DISABLE_CODEXBAR: '1'
         run: node collect.js --dry-run
+
+      # package.json engines는 node >= 18이다. 테스트 러너 API 차이와 섞이지 않게, 런타임 파일이
+      # 18에서 로드되고 한 사이클이 도는지만 본다. 앞 단계들의 Node 버전을 바꾸지 않도록 맨 끝에 둔다.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Node 18 런타임 확인
+        working-directory: collector
+        timeout-minutes: 12
+        env:
+          CHARGE_DISABLE_CODEXBAR: '1'
+        run: |
+          node -v
+          for f in cli.js collect.js identity.js updater.js; do node --check "$f"; done
+          node collect.js --self-test
+          node collect.js --dry-run
