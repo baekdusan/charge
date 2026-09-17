@@ -3,6 +3,26 @@ const assert = require("node:assert/strict");
 
 const CLI = require("./cli");
 
+// 설치 원본 패키지. cloud.json은 gitignore라 새로 받은 저장소와 CI에는 없으므로, 런타임 파일을 임시 폴더에 복사하고
+// cloud.json이 없을 때만 가짜 주소를 넣는다. 패키지 폴더(__dirname)에는 절대 쓰지 않는다: 테스트가 죽어 가짜가 남은 채로
+// 발행되면 모든 설치의 페어링이 깨진다.
+let testPackageDir = null;
+function testPackage() {
+  const fs = require("node:fs");
+  const os = require("node:os");
+  const path = require("node:path");
+  if (testPackageDir) return testPackageDir;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "charge-cli-package-"));
+  for (const name of CLI.runtimeFiles()) {
+    const from = path.join(__dirname, name);
+    if (fs.existsSync(from)) fs.copyFileSync(from, path.join(dir, name));
+    else if (name === "cloud.json") fs.writeFileSync(path.join(dir, name), JSON.stringify({ url: "https://example.invalid", anon: "test-anon" }));
+  }
+  process.on("exit", () => fs.rmSync(dir, { recursive: true, force: true }));
+  testPackageDir = dir;
+  return dir;
+}
+
 test("Pairing saves only Claude location settings for the scheduler, including an empty override", () => {
   const fs = require("node:fs");
   const path = require("node:path");
@@ -107,6 +127,7 @@ test("CLI update needs a pairing, reinstalls the runtime and only re-registers s
       const logs = [];
       const result = await CLI.update({
         confDir, home: root, platform,
+        install: (dir) => CLI.installRuntime(dir, { source: testPackage(), log: () => {} }),
         schedule: (dir) => calls.push(["schedule", dir]),
         runCollect: (dir) => calls.push(["collect", dir]),
         log: (m) => logs.push(m), logError: (m) => logs.push(m),
@@ -133,7 +154,7 @@ test("CLI update needs a pairing, reinstalls the runtime and only re-registers s
     assert.deepEqual(win.calls, [["collect", appDir]]);
     assert.match(win.logs.join("\n"), /install\.ps1/);
     // 두 번째 설치부터는 지금 파일을 app.prev에 백업한다
-    assert.equal(fs.readFileSync(path.join(confDir, "app.prev", "collect.js"), "utf8"), fs.readFileSync(path.join(__dirname, "collect.js"), "utf8"));
+    assert.equal(fs.readFileSync(path.join(confDir, "app.prev", "collect.js"), "utf8"), fs.readFileSync(path.join(testPackage(), "collect.js"), "utf8"));
 
     // macOS: 등록이 이미 이 런타임을 가리키면 launchd를 다시 건드리지 않는다
     const macMissing = await run("darwin");
@@ -236,7 +257,7 @@ test("CLI installRuntime holds the update lock: a live holder blocks (update fai
     const before = install.snapshot();
     // 살아 있는 프로세스(이 테스트)의 잠금: 아무것도 바꾸지 않고 LOCKED로 끝난다, 남의 잠금은 지우지 않는다
     fs.writeFileSync(lockFile, String(process.pid));
-    await assert.rejects(CLI.installRuntime(confDir), (e) => e.code === "LOCKED" && /교체하는 중이라 지금은 설치하지 않습니다/.test(e.message));
+    await assert.rejects(CLI.installRuntime(confDir, { source: testPackage() }), (e) => e.code === "LOCKED" && /교체하는 중이라 지금은 설치하지 않습니다/.test(e.message));
     assert.deepEqual(install.snapshot(), before);
     assert.equal(fs.readFileSync(lockFile, "utf8"), String(process.pid));
     assert.equal(fs.existsSync(path.join(confDir, "app.prev")), false);
@@ -245,6 +266,7 @@ test("CLI installRuntime holds the update lock: a live holder blocks (update fai
     const logs = [];
     const result = await CLI.update({
       confDir, home: install.root, platform: "linux",
+      install: (dir) => CLI.installRuntime(dir, { source: testPackage(), log: () => {} }),
       schedule: (dir) => calls.push(["schedule", dir]), runCollect: (dir) => calls.push(["collect", dir]),
       log: (m) => logs.push(m), logError: (m) => logs.push(m),
     });
@@ -255,24 +277,24 @@ test("CLI installRuntime holds the update lock: a live holder blocks (update fai
     // 페어링은 잠깐 기다렸다가 한 번 더 잡는다
     setTimeout(() => fs.rmSync(lockFile, { force: true }), 100);
     const waited = [];
-    assert.equal(await CLI.installRuntime(confDir, { waitMs: 500, log: (m) => waited.push(m) }), appDir);
+    assert.equal(await CLI.installRuntime(confDir, { source: testPackage(), waitMs: 500, log: (m) => waited.push(m) }), appDir);
     assert.match(waited.join("\n"), /다시 시도합니다/);
-    assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), fs.readFileSync(path.join(__dirname, "collect.js"), "utf8"));
+    assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), fs.readFileSync(path.join(testPackage(), "collect.js"), "utf8"));
     assert.equal(fs.existsSync(lockFile), false, "released after the install");
     // 기다려도 풀리지 않으면 실패한다
     fs.writeFileSync(lockFile, String(process.pid));
-    await assert.rejects(CLI.installRuntime(confDir, { waitMs: 50, log: () => {} }), { code: "LOCKED" });
+    await assert.rejects(CLI.installRuntime(confDir, { source: testPackage(), waitMs: 50, log: () => {} }), { code: "LOCKED" });
     // 만든 프로세스가 죽은 잠금과 10분이 지난 잠금은 넘겨받는다. 그 죽은 설치가 남긴 점검, 스테이징 폴더도 치운다
     const exited = spawnSync(process.execPath, ["-e", ""]);
     fs.writeFileSync(lockFile, String(exited.pid));
     for (const name of ["app.self-test-dead", "app.staging-dead"]) fs.mkdirSync(path.join(confDir, name));
-    await CLI.installRuntime(confDir, { log: () => {} });
+    await CLI.installRuntime(confDir, { source: testPackage(), log: () => {} });
     assert.equal(fs.existsSync(lockFile), false);
     assert.deepEqual(fs.readdirSync(confDir).filter((n) => /^app\.(self-test|staging)-/.test(n)), []);
     fs.writeFileSync(lockFile, String(process.pid));
     const old = new Date(Date.now() - 11 * 60_000);
     fs.utimesSync(lockFile, old, old);
-    await CLI.installRuntime(confDir, { log: () => {} });
+    await CLI.installRuntime(confDir, { source: testPackage(), log: () => {} });
     assert.equal(fs.existsSync(lockFile), false);
   } finally {
     install.cleanup();
@@ -297,12 +319,12 @@ test("CLI installRuntime backs up to app.prev and swaps through .new with collec
       renames.push([path.basename(from), path.basename(to)]);
       return realRename(from, to);
     };
-    await CLI.installRuntime(confDir, { log: () => {} });
+    await CLI.installRuntime(confDir, { source: testPackage(), log: () => {} });
     fs.promises.rename = realRename;
     assert.deepEqual(renames.map(([, to]) => to), INSTALL_ORDER);
     assert.ok(renames.every(([from, to]) => from === `${to}.new`), JSON.stringify(renames));
     for (const name of CLI.runtimeFiles()) {
-      assert.equal(fs.readFileSync(path.join(appDir, name), "utf8"), fs.readFileSync(path.join(__dirname, name), "utf8"), name);
+      assert.equal(fs.readFileSync(path.join(appDir, name), "utf8"), fs.readFileSync(path.join(testPackage(), name), "utf8"), name);
     }
     assert.equal(fs.readFileSync(path.join(appDir, ".claude-rate-limit.json"), "utf8"), state, "collector state files are kept");
     assert.equal(fs.existsSync(path.join(appDir, U.UPDATE_MARKER)), false);
@@ -318,7 +340,7 @@ test("CLI installRuntime backs up to app.prev and swaps through .new with collec
       await realRename(from, to);
       if (++count === 1) throw Object.assign(new Error("disk gone"), { code: "EIO" });
     };
-    await assert.rejects(CLI.installRuntime(confDir, { log: () => {} }), /disk gone/);
+    await assert.rejects(CLI.installRuntime(confDir, { source: testPackage(), log: () => {} }), /disk gone/);
     fs.promises.rename = realRename;
     assert.equal(count, 1);
     assert.deepEqual(install.snapshot(), before);
@@ -332,7 +354,7 @@ test("CLI installRuntime backs up to app.prev and swaps through .new with collec
       "const rename = fs.promises.rename;",
       "let count = 0;",
       'fs.promises.rename = async (from, to) => { await rename(from, to); if (++count === 1) process.kill(process.pid, "SIGKILL"); };',
-      `require(${JSON.stringify(path.join(__dirname, "cli.js"))}).installRuntime(${JSON.stringify(confDir)}, { log: () => {} })`,
+      `require(${JSON.stringify(path.join(__dirname, "cli.js"))}).installRuntime(${JSON.stringify(confDir)}, { source: ${JSON.stringify(testPackage())}, log: () => {} })`,
       "  .catch((e) => { console.error(e); process.exit(2); });",
     ].join("\n"));
     const killed = spawnSync(process.execPath, [killer], { encoding: "utf8", env: install.env, timeout: 60_000 });
@@ -345,7 +367,7 @@ test("CLI installRuntime backs up to app.prev and swaps through .new with collec
     assert.match(id, /^[0-9a-f-]{36}$/);
     assert.ok(Math.abs(Date.now() - startedAt) < 60_000);
     assert.equal(U.updateInProgress({ appDir }), false, "the killed installer is not running");
-    assert.equal(fs.readFileSync(path.join(appDir, "cli.js"), "utf8"), fs.readFileSync(path.join(__dirname, "cli.js"), "utf8"), "the first file is new");
+    assert.equal(fs.readFileSync(path.join(appDir, "cli.js"), "utf8"), fs.readFileSync(path.join(testPackage(), "cli.js"), "utf8"), "the first file is new");
     assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), old["collect.js"], "collect.js is still the old one");
     assert.equal(fs.readFileSync(path.join(appDir, "package.json"), "utf8"), old["package.json"]);
     assert.equal(fs.readFileSync(path.join(confDir, "update.lock"), "utf8"), String(killed.pid), "the killed installer left its lock");
@@ -359,18 +381,18 @@ test("CLI installRuntime backs up to app.prev and swaps through .new with collec
     assert.deepEqual(install.snapshot(), before, "every file is the old one again");
     assert.equal(fs.existsSync(path.join(appDir, U.UPDATE_MARKER)), false);
     // 죽은 설치의 잠금은 다음 설치가 넘겨받는다
-    await CLI.installRuntime(confDir, { log: () => {} });
-    assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), fs.readFileSync(path.join(__dirname, "collect.js"), "utf8"));
+    await CLI.installRuntime(confDir, { source: testPackage(), log: () => {} });
+    assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), fs.readFileSync(path.join(testPackage(), "collect.js"), "utf8"));
     assert.equal(fs.existsSync(path.join(confDir, "update.lock")), false);
 
     // 4. 되돌리기까지 실패한 표시가 남아 있으면(백업이 사라졌다) 표시를 지우고 런타임 전체를 새로 설치한다
     install.reset();
     fs.writeFileSync(path.join(appDir, U.UPDATE_MARKER), JSON.stringify({ backup: path.join(confDir, "missing-backup"), files: ["cli.js"], added: [] }));
     const logs = [];
-    await CLI.installRuntime(confDir, { log: (m) => logs.push(m) });
+    await CLI.installRuntime(confDir, { source: testPackage(), log: (m) => logs.push(m) });
     assert.match(logs.join("\n"), /되돌리지 못했습니다.*런타임 전체를 새로 설치합니다/);
     assert.equal(fs.existsSync(path.join(appDir, U.UPDATE_MARKER)), false);
-    assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), fs.readFileSync(path.join(__dirname, "collect.js"), "utf8"));
+    assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), fs.readFileSync(path.join(testPackage(), "collect.js"), "utf8"));
   } finally {
     fs.promises.rename = realRename;
     install.cleanup();
@@ -387,7 +409,7 @@ test("CLI installRuntime refuses a package that fails node --check or its self-t
     const before = install.snapshot();
     const source = path.join(root, "package");
     fs.mkdirSync(source);
-    for (const name of CLI.runtimeFiles()) fs.copyFileSync(path.join(__dirname, name), path.join(source, name));
+    for (const name of CLI.runtimeFiles()) fs.copyFileSync(path.join(testPackage(), name), path.join(source, name));
     // 파일이 빠진 패키지(청소되다 만 npx 캐시): 남은 파일만 깔면 옛 파일 하나가 새 파일들 사이에 남고 자체 점검은 그것을 못 잡는다
     for (const missing of ["collect.js", "package.json", "install.linux.sh"]) {
       fs.renameSync(path.join(source, missing), path.join(root, missing));
@@ -437,8 +459,8 @@ test("CLI run executes the installed runtime, so a manual run shares the schedul
     const env = { ...process.env, HOME: root, USERPROFILE: root, CHARGE_HOME: confDir, NODE_OPTIONS: "" };
     const run = spawnSync(process.execPath, [path.join(__dirname, "cli.js"), "run"], { encoding: "utf8", env, timeout: 60_000 });
     assert.equal(run.status, 0, run.stderr);
-    // 임시 폴더가 심볼릭 링크 아래일 수 있어(macOS의 /var) 실제 경로로 비교한다
-    assert.equal(fs.readFileSync(marker, "utf8"), fs.realpathSync.native(path.join(confDir, "app", "collect.js")));
+    // 임시 폴더가 심볼릭 링크(macOS의 /var)나 8.3 짧은 이름(Windows의 RUNNER~1) 아래일 수 있어 양쪽 모두 실제 경로로 비교한다
+    assert.equal(fs.realpathSync.native(fs.readFileSync(marker, "utf8")), fs.realpathSync.native(path.join(confDir, "app", "collect.js")));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -466,7 +488,7 @@ test("CLI update does not trust the installed version while an interrupted updat
     const logs = [];
     const result = await CLI.update({
       confDir, home: root, platform: "linux",
-      install: (dir) => CLI.installRuntime(dir, { log: (m) => logs.push(m) }),
+      install: (dir) => CLI.installRuntime(dir, { source: testPackage(), log: (m) => logs.push(m) }),
       schedule: (dir) => calls.push(["schedule", dir]), runCollect: (dir) => calls.push(["collect", dir]),
       log: (m) => logs.push(m), logError: (m) => logs.push(m),
     });
@@ -477,7 +499,7 @@ test("CLI update does not trust the installed version while an interrupted updat
     assert.match(logs.join("\n"), /되돌린 뒤 설치합니다/);
     assert.equal(logs.some((line) => /더 새 버전.*그대로 둡니다/.test(line)), false, logs.join("\n"));
     assert.equal(fs.existsSync(path.join(appDir, U.UPDATE_MARKER)), false);
-    assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), fs.readFileSync(path.join(__dirname, "collect.js"), "utf8"));
+    assert.equal(fs.readFileSync(path.join(appDir, "collect.js"), "utf8"), fs.readFileSync(path.join(testPackage(), "collect.js"), "utf8"));
     assert.equal(JSON.parse(fs.readFileSync(path.join(appDir, "package.json"), "utf8")).version, version);
   } finally {
     install.cleanup();
