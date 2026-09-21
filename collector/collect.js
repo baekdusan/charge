@@ -414,19 +414,47 @@ function claudeCredentialLocation(env = process.env, home = HOME) {
   return { configDir, file: path.join(storageDir, ".credentials.json"), service: `Claude Code-credentials${suffix}`, globalConfig, sharedStore };
 }
 
-// 반환하는 자격증명에는 고른 소스("keychain" 또는 "file")를 credentialSource로 붙인다 (진단 로그용)
-async function claudeCredentials({ env = process.env, home = HOME, run = runAsync, read = fs.readFileSync, now = Date.now() } = {}) {
+// Claude Code는 리프레시 토큰을 서버가 거절(invalid_grant)하면 자격증명을 지우지 않고 토큰만 비운다
+// ({ ...claudeAiOauth, accessToken: "", refreshToken: "", expiresAt: 0 } — 구독 종류, 한도 등급, 권한 범위는 남는다).
+// /logout과 API 키(Console) 계정 전환은 claudeAiOauth 자체를 지운다. 그래서 "토큰만 빈 claudeAiOauth"는
+// 끝난 구독 로그인이고, 할 일은 /login 하나다. 토큰 키가 아예 없는 모양은 모르는 상태라 껍데기로 보지 않는다.
+function isSignedOutClaudeCredential(data) {
+  const oauth = data?.claudeAiOauth;
+  if (!oauth || typeof oauth !== "object" || Array.isArray(oauth)) return false;
+  const blank = (value) => value === undefined || value === null || (typeof value === "string" && !value.trim());
+  return typeof oauth.accessToken === "string" && blank(oauth.accessToken) && blank(oauth.refreshToken);
+}
+
+// 반환하는 자격증명에는 고른 소스("keychain" 또는 "file")를 credentialSource로 붙인다 (진단 로그용).
+// 쓸 수 있는 소스가 없으면 던지는 오류의 signedOut이 "끝난 로그인(껍데기)"인지 알려 준다.
+async function claudeCredentials({
+  env = process.env, home = HOME, run = runAsync, read = fs.readFileSync, now = Date.now(), platform = process.platform,
+} = {}) {
   const location = claudeCredentialLocation(env, home);
   const sources = [];
+  // security 종료 코드 44(errSecItemNotFound)는 항목이 없다는 확답이다: Keychain에 살아 있는 로그인이 숨어 있을 수 없고,
+  // Claude Code도 44면 파일로 넘어간다. 36(잠김, 상호작용 불가)이나 시간 초과는 Keychain 상태를 모르는 것이다.
+  let keychainAbsent = false;
   try {
     sources.push({ source: "keychain", data: JSON.parse(await run("security", ["find-generic-password", "-s", location.service, "-w"], 10_000)) });
-  } catch {}
+  } catch (e) {
+    keychainAbsent = e?.code === 44;
+  }
   try {
     sources.push({ source: "file", data: JSON.parse(read(location.file, "utf8")) });
   } catch {}
   const usable = sources.filter(({ data }) => typeof (data?.claudeAiOauth ?? data)?.accessToken === "string"
     && (data.claudeAiOauth ?? data).accessToken.trim());
-  if (!usable.length) throw new Error("Claude Code 구독 로그인 정보를 읽을 수 없음");
+  if (!usable.length) {
+    // macOS의 기본 저장소는 Keychain이다. Keychain을 못 읽은 채 파일의 껍데기만 보고 로그인이 끝났다고 하면
+    // Keychain에 살아 있는 로그인을 두고 다시 로그인하라고 시킨다 (파일 껍데기는 몇 주씩 남는다). 그래서
+    // macOS는 Keychain 자체가 껍데기이거나 항목이 없다고 확인됐을 때만, 다른 OS는 읽힌 소스가 모두 껍데기일 때만
+    // 끝난 로그인으로 본다.
+    const stubs = sources.filter(({ data }) => isSignedOutClaudeCredential(data));
+    const signedOut = stubs.length > 0 && stubs.length === sources.length
+      && (platform !== "darwin" || keychainAbsent || stubs.some(({ source }) => source === "keychain"));
+    throw Object.assign(new Error("Claude Code 구독 로그인 정보를 읽을 수 없음"), { signedOut });
+  }
   const chosen = freshestCredentials(usable.map(({ data }) => data), now);
   return { ...chosen, credentialSource: usable.find(({ data }) => data === chosen).source };
 }
@@ -685,7 +713,7 @@ async function logHttpFailure(label, res, body = null, hint = "") {
 }
 
 // 이번 사이클에 Claude usage 요청을 보내지 않았으면 이유와 함께 정확히 한 줄 남긴다 (D7).
-// reason: expired, rejected(서버가 401로 거절한 토큰), gated, shared, spacing, no-credentials. 자격증명 세대(토큰 해시 앞 8자)와 계정 해시는
+// reason: expired, rejected(서버가 401로 거절한 토큰), gated, shared, spacing, no-credentials, signed-out(토큰만 비운 껍데기). 자격증명 세대(토큰 해시 앞 8자)와 계정 해시는
 // 비밀이 아니라 함께 적는다. 토큰, uuid, 이메일은 넣지 않는다. 값은 제어 문자를 지운 뒤 자른다.
 // spacing에 reason=lock이 붙으면 이 기기의 다른 실행이 마침 간격 잠금을 잡고 판단하는 중이라 물러난 것이다.
 function logClaudeNoRequest(reason, fields = {}, hint = "") {
@@ -851,7 +879,8 @@ function claudeUsageResult(d, { plan, account }) {
 // 반환: { provider, status, held? }. status는 "ok", "stale", "shared", "auth_expired[:revoked]",
 // "error[:reason][;key=value]". held는 최소 간격(D13) 때문에 요청을 미룬 사이클이다: 상태는 지난 요청의 결과를
 // 그대로 싣고, 연속 실패 기록은 늘리지 않는다 (recordCollectionHealth의 held).
-// 설치 흔적이 없으면 status null; 설치 흔적은 있지만 로그인 정보를 못 읽으면 설정 안내.
+// 설치 흔적이 없으면 status null; 설치 흔적은 있지만 로그인 정보를 못 읽으면 설정 안내(error:credentials_missing),
+// Claude Code가 토큰만 비운 껍데기를 남겼으면 다시 로그인 안내(error:credentials_missing:signed_out).
 // 순서 (D1): 자격증명, 로컬 만료 확인, 401로 거절된 토큰 확인, 계정 해시, 임대, 간격 잠금, 429 게이트, 최소 간격, 요청.
 // 게이트와 최소 간격은 잠금 안에서 상태 파일을 다시 읽고 판단한다 (같은 기기의 겹친 실행이 둘 다 묻지 않게, D13).
 // 요청을 보내지 않으면 한 줄 로그 (D7).
@@ -869,7 +898,14 @@ async function claudeProvider({
   let cred;
   try {
     cred = await loadCredentials();
-  } catch {
+  } catch (e) {
+    // Claude Code가 토큰만 비운 껍데기를 남겼으면 로그인이 끝난 것이다 (isSignedOutClaudeCredential).
+    // 설치 흔적은 껍데기 자체가 증명하므로 hasClaude를 묻지 않는다. 접두사는 credentials_missing을
+    // 지켜 구버전 앱은 기존 설정 안내를, 새 앱은 /login 안내를 보여 준다.
+    if (e?.signedOut) {
+      logClaudeNoRequest("signed-out", {}, "Claude Code 구독 로그인이 끝났습니다. 이 PC의 Claude Code에서 /login 하세요");
+      return { provider: null, status: "error:credentials_missing:signed_out" };
+    }
     // A config directory without readable subscription credentials is a setup
     // issue, not proof that Claude Code is absent. Surface it even on first use.
     const detected = hasClaude();
@@ -1812,6 +1848,7 @@ module.exports = {
   claimPollLease,
   claudeCredentialLocation,
   claudeCredentials,
+  isSignedOutClaudeCredential,
   claudeProvider,
   codexBarEntryToProvider,
   codexLiveWindows,

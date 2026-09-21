@@ -25,6 +25,9 @@ final class CollectionHealthTests: XCTestCase {
         XCTAssertFalse(issue("error:rate_limited;failures=5").isAccessDenied)
         XCTAssertFalse(issue("error:rate_limited;failures=5").isAuthExpired)
         XCTAssertTrue(issue("error:credentials_missing;failures=1").needsSetup)
+        XCTAssertTrue(issue("error:credentials_missing:signed_out;failures=1").needsSetup)
+        XCTAssertTrue(issue("error:credentials_missing:signed_out;failures=1").isSignedOut)
+        XCTAssertFalse(issue("error:credentials_missing:signed_out;failures=1").isAuthExpired)
         XCTAssertTrue(issue("error:access_denied;failures=5").isAccessDenied)
     }
 

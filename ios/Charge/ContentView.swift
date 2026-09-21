@@ -297,9 +297,10 @@ struct ContentView: View {
                             // Older collectors have no failure count; don't invent one.
                             Text("Charge can't read \(issue.providerName) usage on this PC")
                         }
-                        // 만료는 "Claude Code를 한 번 여세요", 폐기는 "다시 로그인", 요청 제한은 다음 시도 시각.
+                        // 만료는 "Claude Code를 한 번 여세요", 폐기와 끝난 로그인은 "다시 로그인", 요청 제한은 다음 시도 시각.
                         // 실패 횟수가 붙는 새 수집기에서도 사용자가 할 일은 같으므로 항상 붙인다.
-                        if !issue.needsSetup, let hint = issue.actionHint(at: now) {
+                        // 일반 설정 안내(credentials_missing)에는 힌트가 없다(actionHint가 nil).
+                        if let hint = issue.actionHint(at: now) {
                             Text(hint)
                                 .foregroundStyle(.secondary)
                         }

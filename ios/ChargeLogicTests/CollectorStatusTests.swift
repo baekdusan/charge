@@ -70,6 +70,9 @@ final class CollectorStatusTests: XCTestCase {
         XCTAssertTrue(CollectStatus("auth_expired:revoked;failures=2").isRevoked)
         XCTAssertTrue(CollectStatus("error:access_denied").isAccessDenied)
         XCTAssertTrue(CollectStatus("error:credentials_missing").needsSetup)
+        XCTAssertTrue(CollectStatus("error:credentials_missing:signed_out;failures=3").needsSetup)
+        XCTAssertTrue(CollectStatus("error:credentials_missing:signed_out;failures=3").isSignedOut)
+        XCTAssertFalse(CollectStatus("error:credentials_missing").isSignedOut)
         XCTAssertTrue(CollectStatus("error").isIssue)
         XCTAssertFalse(CollectStatus("stale").isIssue)
         XCTAssertFalse(CollectStatus("some_future_state").isIssue)
@@ -205,6 +208,39 @@ final class CollectorStatusTests: XCTestCase {
             issue("auth_expired:revoked", version: nil).actionHint(at: now),
             String(localized: "Sign in again in Claude Code (/login)")
         )
+    }
+
+    /// 수집기가 Claude Code의 토큰만 빈 자격증명 껍데기를 확인하면(credentials_missing:signed_out) 로그인이 끝난 것이다.
+    /// API 키 계정일 수 없으므로 /status 확인 대신 /login을 바로 안내하고, 구버전 앱과 같은 설정 헤드라인은 유지한다.
+    func testSignedOutStubAsksToSignInAgain() {
+        let signedOut = issue("error:credentials_missing:signed_out;failures=1;since=1789340000")
+        XCTAssertTrue(signedOut.isSignedOut)
+        XCTAssertTrue(signedOut.needsSetup, "접두사 호환: 구버전 앱은 설정 안내로 읽는다")
+        XCTAssertFalse(signedOut.isAuthExpired)
+        XCTAssertEqual(signedOut.headline(lastAttempt: now), .setup)
+        XCTAssertEqual(
+            signedOut.guidance(at: now),
+            String(localized: "Claude Code's sign-in on this PC has ended. Run /login in Claude Code on this PC to sign in again.")
+        )
+        XCTAssertEqual(signedOut.actionHint(at: now), String(localized: "Sign in again in Claude Code (/login)"))
+        // 수집기 버전과 무관하다: 이 상태를 보내는 수집기만 보낸다
+        XCTAssertEqual(issue("error:credentials_missing:signed_out", version: nil).actionHint(at: now),
+                       String(localized: "Sign in again in Claude Code (/login)"))
+
+        // 일반 설정 안내는 그대로다 (힌트 없음)
+        let plain = issue("error:credentials_missing;failures=1;since=1789340000")
+        XCTAssertFalse(plain.isSignedOut)
+        XCTAssertEqual(
+            plain.guidance(at: now),
+            String(localized: "Charge found Claude Code but couldn't read its subscription sign-in. Open Claude Code on this PC and check /status. API-key accounts don't provide subscription limits.")
+        )
+        XCTAssertNil(plain.actionHint(at: now))
+        XCTAssertNotEqual(plain.guidance(at: now), signedOut.guidance(at: now))
+
+        // Claude 밖의 프로바이더가 같은 상태를 보내도 Claude Code 문구는 쓰지 않는다
+        let codex = issue("error:credentials_missing:signed_out", provider: "codex")
+        XCTAssertEqual(codex.guidance(at: now), plain.guidance(at: now))
+        XCTAssertNil(codex.actionHint(at: now))
     }
 
     func testRateLimitMentionsRetryTimeOnlyWhenPending() {

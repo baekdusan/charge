@@ -705,6 +705,7 @@ struct CollectorDevice: Codable, Identifiable {
         var isRateLimited: Bool { parsed.isRateLimited }
         var isAccessDenied: Bool { parsed.isAccessDenied }
         var needsSetup: Bool { parsed.needsSetup }
+        var isSignedOut: Bool { parsed.isSignedOut }
 
         var consecutiveFailures: Int? { parsed.consecutiveFailures }
 
@@ -779,6 +780,11 @@ struct CollectorDevice: Codable, Identifiable {
         func guidance(at now: Date = Date()) -> String {
             let state = parsed
             if state.needsSetup {
+                // 끝난 로그인(credentials_missing:signed_out)은 수집기가 Claude Code가 토큰만 비운 껍데기를 확인한
+                // 것이라 API 키 계정일 수 없다. /status 확인 대신 /login을 바로 안내한다.
+                if state.isSignedOut, isClaude {
+                    return String(localized: "Claude Code's sign-in on this PC has ended. Run /login in Claude Code on this PC to sign in again.")
+                }
                 return String(localized: "Charge found Claude Code but couldn't read its subscription sign-in. Open Claude Code on this PC and check /status. API-key accounts don't provide subscription limits.")
             }
             if state.isRateLimited {
@@ -806,6 +812,7 @@ struct CollectorDevice: Codable, Identifiable {
         /// 기기 상태 줄 아래에 붙이는 짧은 조치 한 줄. 할 수 있는 일이 없으면 nil.
         func actionHint(at now: Date = Date()) -> String? {
             let state = parsed
+            if state.isSignedOut, isClaude { return String(localized: "Sign in again in Claude Code (/login)") }
             if state.isAuthExpired {
                 guard isClaude else { return String(localized: "Try signing in again in \(providerName)") }
                 if state.isRevoked { return String(localized: "Sign in again in Claude Code (/login)") }
@@ -897,6 +904,9 @@ struct CollectStatus: Equatable {
     var isRateLimited: Bool { kind.hasPrefix("error:rate_limited") }
     var isAccessDenied: Bool { kind.hasPrefix("error:access_denied") }
     var needsSetup: Bool { kind.hasPrefix("error:credentials_missing") }
+    /// 수집기가 Claude Code의 토큰만 빈 자격증명 껍데기를 확인했다: 로그인이 끝났고 /login이 필요하다.
+    /// credentials_missing의 하위 상태라 구버전 앱은 설정 안내(needsSetup)로 읽는다.
+    var isSignedOut: Bool { kind.hasPrefix("error:credentials_missing:signed_out") }
 
     var consecutiveFailures: Int? {
         guard let raw = parameter("failures"), let count = Int(raw), count > 0 else { return nil }

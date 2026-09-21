@@ -113,6 +113,22 @@
         }
       }
     },
+    "Claude Code's sign-in on this PC has ended. Run /login in Claude Code on this PC to sign in again." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude Code's sign-in on this PC has ended. Run /login in Claude Code on this PC to sign in again."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 PC의 Claude Code 로그인 세션이 끝났어요. 이 PC의 Claude Code에서 /login 을 실행해 다시 로그인해 주세요."
+          }
+        }
+      }
+    },
     "Claude Code's sign-in on this PC is no longer valid. Run /login in Claude Code on this PC to sign in again." : {
       "localizations" : {
         "en" : {

@@ -406,6 +406,76 @@ test("Claude credentials follow the selected store and never fall back to anothe
   }), /로그인/);
 });
 
+// Claude Code는 리프레시 토큰이 invalid_grant로 죽으면 토큰만 비운 껍데기를 남긴다(로그아웃, Console 전환은 객체를 지운다).
+// 그 껍데기는 "끝난 로그인"이라 /login 안내를 보내되, macOS는 Keychain이 껍데기일 때만 그렇게 본다.
+test("Claude credentials tell a signed-out stub from unreadable or missing credentials", async () => {
+  const stub = { claudeAiOauth: { accessToken: "", refreshToken: "", expiresAt: 0, subscriptionType: "max", rateLimitTier: "default_claude_max_20x" } };
+  assert.equal(C.isSignedOutClaudeCredential(stub), true);
+  assert.equal(C.isSignedOutClaudeCredential({ claudeAiOauth: { accessToken: " ", expiresAt: 0 } }), true);
+  for (const other of [
+    { mcpOAuth: {} }, // /logout, Console 전환: claudeAiOauth 자체가 없다
+    { claudeAiOauth: { subscriptionType: "max" } }, // 토큰 키가 없는 모양은 모르는 상태
+    { claudeAiOauth: { accessToken: "", refreshToken: "still-here" } },
+    { claudeAiOauth: { accessToken: "live", refreshToken: "" } },
+    { claudeAiOauth: [] }, { claudeAiOauth: "" }, null, "stub",
+  ]) {
+    assert.equal(C.isSignedOutClaudeCredential(other), false, JSON.stringify(other));
+  }
+
+  const failing = () => { throw new Error("not found"); };
+  // keychain이 숫자면 security가 그 종료 코드로 실패한 것이다 (44 = 항목 없음, 36 = 잠김)
+  const load = ({ keychain, file, platform }) => C.claudeCredentials({
+    env: {}, home: os.tmpdir(), platform,
+    run: async () => {
+      if (keychain === undefined) failing();
+      if (typeof keychain === "number") throw Object.assign(new Error("security failed"), { code: keychain });
+      return JSON.stringify(keychain);
+    },
+    read: () => { if (file === undefined) failing(); return JSON.stringify(file); },
+  });
+  const signedOut = async (input) => {
+    let error;
+    await assert.rejects(load(input), (e) => { error = e; return /로그인/.test(e.message); });
+    return error.signedOut;
+  };
+  assert.equal(await signedOut({ keychain: stub, file: stub, platform: "darwin" }), true);
+  assert.equal(await signedOut({ keychain: stub, platform: "darwin" }), true);
+  assert.equal(await signedOut({ file: stub, platform: "linux" }), true);
+  assert.equal(await signedOut({ file: stub, platform: "win32" }), true);
+  // macOS에서 Keychain을 못 읽었으면 파일 껍데기만으로 끝난 로그인이라고 하지 않는다 (Keychain의 로그인이 살아 있을 수 있다)
+  assert.equal(await signedOut({ file: stub, platform: "darwin" }), false);
+  assert.equal(await signedOut({ keychain: 36, file: stub, platform: "darwin" }), false);
+  // Keychain에 항목이 없다고 확인되면(44) 파일이 유일한 저장소라 파일 껍데기는 끝난 로그인이다 (SSH 전용 Mac)
+  assert.equal(await signedOut({ keychain: 44, file: stub, platform: "darwin" }), true);
+  assert.equal(await signedOut({ keychain: 44, file: { mcpOAuth: {} }, platform: "darwin" }), false);
+  // 껍데기가 아닌 소스가 섞이면 모르는 상태다
+  assert.equal(await signedOut({ keychain: stub, file: { mcpOAuth: {} }, platform: "darwin" }), false);
+  assert.equal(await signedOut({ keychain: { mcpOAuth: {} }, file: stub, platform: "linux" }), false);
+  assert.equal(await signedOut({ platform: "darwin" }), false);
+  // 살아 있는 토큰이 어느 한쪽에라도 있으면 껍데기는 무시하고 그 토큰을 쓴다
+  const live = await load({ keychain: stub, file: { claudeAiOauth: { accessToken: "live", expiresAt: Date.now() + 3600_000 } }, platform: "darwin" });
+  assert.deepEqual([live.claudeAiOauth.accessToken, live.credentialSource], ["live", "file"]);
+
+  // 끝난 로그인은 설치 흔적을 묻지 않고 credentials_missing의 하위 상태로 보고하고, 로그 한 줄의 이유는 signed-out이다
+  for (const detected of [true, false]) {
+    const { value, lines } = await quietly(() => C.claudeProvider({
+      hasClaude: () => detected,
+      loadCredentials: async () => { throw Object.assign(new Error("stub"), { signedOut: true }); },
+      fetchFn: async () => { throw new Error("must not request"); },
+    }));
+    assert.deepEqual(value, { provider: null, status: "error:credentials_missing:signed_out" });
+    assert.equal(lines.length, 1, lines.join("\n"));
+    assert.ok(lines[0].startsWith("claude usage 요청 안 함 (signed-out), "), lines[0]);
+    assert.match(lines[0], /\/login/);
+  }
+  const plain = await quietly(() => C.claudeProvider({
+    hasClaude: () => true,
+    loadCredentials: async () => { throw Object.assign(new Error("stub"), { signedOut: false }); },
+    fetchFn: async () => { throw new Error("must not request"); },
+  }));
+  assert.equal(plain.value.status, "error:credentials_missing");
+});
+
 test("Collection health persists real attempts and resets on recovery, gaps and pairing changes", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "charge-health-"));
   const file = path.join(dir, "health.json");
