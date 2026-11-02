@@ -169,6 +169,8 @@ Backend config lives in `ios/Shared/CloudConfig.txt` (line 1 URL, line 2 anon ke
 | Unpair (and revoke token) | `npx charge-connect unpair` |
 | Update an existing install | `npx charge-connect@latest update` |
 
+**After a computer is removed in the app.** Swiping a computer away in the app (or deleting the account) drops its device token on the server, but the schedule on that computer keeps running. From collector **0.2.3**, once the backend answers `invalid device token`, the collector logs why, skips collection and upload for 24 hours, and then tries once a day instead of every 5 minutes. The schedule and `~/.charge/config.json` are left in place: pairing again (`npx charge-connect <code>`) resumes immediately, and a token that comes back on the server (for example after a restore) resumes within a day. To stop the schedule for good, run `npx charge-connect unpair` and the matching *Unregister* command above.
+
 ### Updating the collector
 
 Collectors from **0.2.0** update themselves. At most once every 12 hours (plus up to an hour of random jitter), after uploading, the scheduled run asks the backend for the latest release manifest and installs it only if all of these checks pass:

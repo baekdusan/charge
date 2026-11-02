@@ -525,7 +525,7 @@ end $$;
 -- stable(immutable 아님): text::timestamptz 캐스트는 세션 TimeZone 설정에 의존한다
 create or replace function public.charge_safe_ts(p text)
 returns timestamptz
-language plpgsql stable
+language plpgsql stable set search_path = public, pg_temp
 as $$
 begin
   return p::timestamptz;
@@ -537,7 +537,7 @@ end $$;
 -- 롤백돼 그 기기가 영구히 침묵한다. 못 읽는 값은 null로 떨구고 나머지는 살린다.
 create or replace function public.charge_num(p text)
 returns double precision
-language plpgsql immutable
+language plpgsql immutable set search_path = public, pg_temp
 as $$
 declare
   v double precision;
@@ -555,7 +555,7 @@ end $$;
 
 create or replace function public.charge_safe_date(p text)
 returns date
-language plpgsql stable
+language plpgsql stable set search_path = public, pg_temp
 as $$
 begin
   return p::date;
@@ -568,7 +568,7 @@ end $$;
 -- 영구히 덮을 수 있다. 그래서 클램프가 아니라 미상으로 떨군다.
 create or replace function public.charge_stamp(p text)
 returns timestamptz
-language plpgsql stable
+language plpgsql stable set search_path = public, pg_temp
 as $$
 declare
   t timestamptz := charge_safe_ts(p);

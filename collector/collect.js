@@ -21,6 +21,11 @@ const HEALTH_FILE = path.join(__dirname, ".collection-health.json");
 // Claude usage API 429 게이트와 마지막 usage 요청 시각, 결과 (C1, D12, D13). 프로필 조회로 얻은 계정 해시 (D3)
 const RATE_LIMIT_FILE = path.join(__dirname, ".claude-rate-limit.json");
 const CLAUDE_ACCOUNT_FILE = path.join(__dirname, ".claude-account.json");
+// 서버가 이 기기의 토큰을 모른다고 답한 기록(앱에서 기기 삭제, 계정 삭제). 토큰 해시와 다음 재시도 시각.
+const REVOKED_FILE = path.join(__dirname, ".device-revoked.json");
+// 폐기된 토큰으로는 하루 한 번만 업로드를 시도한다. 5분마다 400을 받아 서버 에러 로그를 채우지 않으면서도,
+// 서버 쪽 복구(백업 복원 등)로 토큰이 되살아나면 늦어도 하루 안에 저절로 재개된다.
+const REVOKED_RETRY_MS = 24 * 3600_000;
 const HOME = process.env.HOME ?? process.env.USERPROFILE;
 
 // 스케줄러가 부를 때는 볼 콘솔이 없으니 출력을 직접 파일로 받는다.
@@ -1768,10 +1773,59 @@ async function pairedUpload(mode, daily, live, providers, collectStatus = null, 
       console.error("구버전 시그니처로 업로드 성공, collect_status는 이번 사이클 미반영(다음 사이클에 복구)");
       return;
     }
-    throw new Error(`업로드 실패 (${res.status}): ${await res.text()}`);
+    throw uploadFailure(res.status, await res.text());
   }
-  throw new Error(`업로드 실패 (${res.status}): ${text}`);
+  throw uploadFailure(res.status, text);
 }
+
+// charge_upload는 토큰 해시가 charge_devices에 없을 때만 'invalid device token'(P0001, 400)을 낸다.
+// 그 행은 앱의 기기 삭제, 계정 삭제, 재페어링으로만 사라지므로 이 응답은 "이 토큰은 끝났다"는 뜻이다.
+// 일시 장애(5xx, 네트워크)와 구분하려고 예외에 표시만 남기고, 처리는 main이 한다.
+function uploadFailure(status, text) {
+  const err = new Error(`업로드 실패 (${status}): ${text}`);
+  if (status === 400 && /invalid device token/i.test(String(text ?? ""))) err.deviceRevoked = true;
+  return err;
+}
+
+// 폐기 기록은 토큰 해시에 묶는다. 앱에서 다시 페어링하면 config.json의 토큰이 바뀌어 기록이 저절로 무효가 되고,
+// 스케줄(launchd, systemd, 작업 스케줄러)과 페어링 파일은 건드리지 않는다. 서버 쪽 사정(복원, 이전)으로
+// 잠시 행이 비었던 경우에 수집기가 스스로를 지워 버리면 사용자가 손으로 되살려야 하기 때문이다.
+function readRevocation(file = REVOKED_FILE) {
+  try {
+    const r = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (typeof r?.token_hash !== "string" || !Number.isFinite(Date.parse(r?.retry_at))) return null;
+    return r;
+  } catch {
+    return null;
+  }
+}
+
+// 반환: { parked: boolean, retryAt?: string }. parked면 이번 실행은 수집, 업로드를 건너뛴다.
+function revocationState({ token, file = REVOKED_FILE, now = Date.now() } = {}) {
+  const r = readRevocation(file);
+  if (!r || !token || r.token_hash !== accountHash(token)) return { parked: false };
+  if (Date.parse(r.retry_at) <= now) return { parked: false, retryAt: r.retry_at };
+  return { parked: true, retryAt: r.retry_at };
+}
+
+function recordRevocation({ token, file = REVOKED_FILE, now = Date.now() } = {}) {
+  const record = {
+    token_hash: accountHash(token),
+    revoked_at: new Date(now).toISOString(),
+    retry_at: new Date(now + REVOKED_RETRY_MS).toISOString(),
+  };
+  fs.writeFileSync(file, JSON.stringify(record));
+  return record;
+}
+
+function clearRevocation(file = REVOKED_FILE) {
+  fs.rmSync(file, { force: true });
+}
+
+const REVOKED_GUIDANCE =
+  "앱에서 이 컴퓨터가 삭제됐습니다(또는 계정이 삭제됐습니다). 다시 연결하려면 앱에서 코드를 발급받아 " +
+  "`npx charge-connect <코드>`를 실행하세요. 수집을 완전히 끄려면 `npx charge-connect unpair` 뒤 " +
+  "install.sh/install.ps1의 스케줄 해제 안내를 따르세요.";
 
 async function main() {
   const mode = resolveMode();
@@ -1780,6 +1834,17 @@ async function main() {
   for (const key of ["CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR"]) {
     if (process.env[key] === undefined && typeof mode?.claude_environment?.[key] === "string") {
       process.env[key] = mode.claude_environment[key];
+    }
+  }
+  // 서버가 토큰을 폐기했다고 답한 뒤 하루 동안은 수집도 업로드도 하지 않는다. 수집은 Claude 사용량 API 호출과
+  // 폴링 리스(charge_claim_poll, 같은 토큰이라 역시 거부된다)를 포함하므로 업로드만 거를 수는 없다.
+  // 업데이트 확인은 그대로 한다: 이 상태를 다루는 방식이 바뀐 릴리스도 받아야 한다. dry-run은 건너뛰지 않는다.
+  if (!DRY_RUN && mode) {
+    const revoked = revocationState({ token: mode.token });
+    if (revoked.parked) {
+      console.error(`[${new Date().toISOString()}] 폐기된 기기 토큰이라 수집을 쉽니다 (다음 시도 ${revoked.retryAt}). ${REVOKED_GUIDANCE}`);
+      await runAutoUpdate(mode);
+      return;
     }
   }
   // 이전 성공 페이로드 캐시 — 일부 수집이 실패해도 그 부분만 이전 값으로 유지
@@ -1855,8 +1920,13 @@ async function main() {
     // 캐시에는 업로드 목록이 아니라 캐시 목록을 쓴다 (shared 사이클에도 마지막 정상 Claude 값을 지우지 않는다)
     fs.writeFileSync(CACHE_FILE, JSON.stringify({ daily, live, providers: cacheProviders }));
     console.log(`[${now}] daily ${daily.length}행 + live + providers ${providers.length}개 업로드 완료`);
+    clearRevocation();
   } catch (e) {
     uploadError = e;
+    if (e?.deviceRevoked) {
+      const record = recordRevocation({ token: mode.token });
+      console.error(`[${now}] 서버가 이 기기의 토큰을 폐기했습니다. ${record.retry_at}까지 수집을 쉽니다. ${REVOKED_GUIDANCE}`);
+    }
   }
   // 업로드가 끝난 뒤(실패했더라도) 업데이트를 확인한다. 서버 계약이 바뀌어 업로드가 계속 실패하는
   // 구버전 수집기도 새 버전을 받아 스스로 복구할 수 있어야 한다.
@@ -1908,6 +1978,11 @@ module.exports = {
   readClaudeAccountUuid,
   readClaudeRequestState,
   recordCollectionHealth,
+  recordRevocation,
+  revocationState,
+  clearRevocation,
+  uploadFailure,
+  REVOKED_RETRY_MS,
   resolveMode,
   runAsync,
   sanitizeCachedProvider,

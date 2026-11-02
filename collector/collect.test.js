@@ -2394,3 +2394,68 @@ test("T44 stale spacing lock: the takeover is serialized so overlapping runs acq
     }
   });
 });
+
+test("T45 uploadFailure: 'invalid device token' 400만 폐기로 표시한다", async () => {
+  assert.equal(C.uploadFailure(400, '{"code":"P0001","message":"invalid device token"}').deviceRevoked, true);
+  // 같은 문구라도 400이 아니면(프록시 오류 페이지 등) 폐기가 아니다
+  assert.equal(C.uploadFailure(502, "invalid device token").deviceRevoked, undefined);
+  assert.equal(C.uploadFailure(400, '{"message":"invalid payload"}').deviceRevoked, undefined);
+  assert.equal(C.uploadFailure(500, null).deviceRevoked, undefined);
+
+  // pairedUpload가 두 실패 경로(즉시, 구버전 재시도 뒤) 모두에서 표시를 붙인다
+  const mode = { url: "https://x.supabase.co", anon: "a", token: "t" };
+  const revokedRes = { ok: false, status: 400, text: async () => '{"message":"invalid device token"}' };
+  await assert.rejects(
+    C.pairedUpload(mode, [], null, [], null, { fetchFn: async () => revokedRes }),
+    (e) => e.deviceRevoked === true,
+  );
+  let calls = 0;
+  const savedError = console.error;
+  console.error = () => {};
+  try {
+    await assert.rejects(
+      C.pairedUpload(mode, [], null, [], null, {
+        fetchFn: async () => (++calls === 1 ? { ok: false, status: 404, text: async () => "PGRST202" } : revokedRes),
+      }),
+      (e) => e.deviceRevoked === true,
+    );
+  } finally {
+    console.error = savedError;
+  }
+  assert.equal(calls, 2);
+});
+
+test("T46 revocation: 같은 토큰은 하루 쉬고, 재페어링(토큰 변경)과 재시도 시각 뒤에는 바로 푼다", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "charge-revoked-"));
+  const file = path.join(dir, ".device-revoked.json");
+  try {
+    const t0 = Date.parse("2026-11-02T04:00:00Z");
+    assert.deepEqual(C.revocationState({ token: "tok", file, now: t0 }), { parked: false });
+
+    const record = C.recordRevocation({ token: "tok", file, now: t0 });
+    assert.equal(record.token_hash, C.accountHash("tok"));
+    assert.equal(Date.parse(record.retry_at) - t0, C.REVOKED_RETRY_MS);
+    // 원문 토큰은 기록에 남지 않는다
+    assert.equal(fs.readFileSync(file, "utf8").includes('"tok"'), false);
+
+    assert.equal(C.revocationState({ token: "tok", file, now: t0 + 5 * 60_000 }).parked, true);
+    assert.equal(C.revocationState({ token: "tok", file, now: t0 + C.REVOKED_RETRY_MS - 1 }).parked, true);
+    assert.equal(C.revocationState({ token: "tok", file, now: t0 + C.REVOKED_RETRY_MS }).parked, false);
+    // 다른 토큰(재페어링)은 기록과 무관하다
+    assert.equal(C.revocationState({ token: "tok2", file, now: t0 + 5 * 60_000 }).parked, false);
+    assert.equal(C.revocationState({ token: null, file, now: t0 + 5 * 60_000 }).parked, false);
+
+    // 깨진 기록은 없는 것으로 친다
+    fs.writeFileSync(file, "{not json");
+    assert.deepEqual(C.revocationState({ token: "tok", file, now: t0 }), { parked: false });
+    fs.writeFileSync(file, JSON.stringify({ token_hash: C.accountHash("tok"), retry_at: "soon" }));
+    assert.deepEqual(C.revocationState({ token: "tok", file, now: t0 }), { parked: false });
+
+    C.recordRevocation({ token: "tok", file, now: t0 });
+    C.clearRevocation(file);
+    assert.equal(fs.existsSync(file), false);
+    C.clearRevocation(file); // 없어도 조용히 지나간다
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
