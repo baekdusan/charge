@@ -1462,6 +1462,35 @@ async function collectCodexBarProviders() {
     providers.push(provider);
     statuses[provider.id] = "ok";
   }
+
+  // CodexBar's automatic source can select Antigravity OAuth even when that
+  // source returns identity but no quota windows. Antigravity's CLI source may
+  // still have the usable limits, so retry that provider explicitly before
+  // leaving an older server snapshot as the only visible data.
+  const sawAntigravity = bridgeEntries.some(
+    (entry) => textValue(entry?.provider, entry?.id)?.toLowerCase() === "antigravity",
+  );
+  if (sawAntigravity && !providers.some((provider) => provider.id === "antigravity")) {
+    try {
+      const fallbackRaw = await runAsync(cli, [
+        "usage", "--provider", "antigravity", "--source", "cli", "--format", "json",
+      ], 90_000);
+      const fallbackEntries = parseCodexBarJSON(fallbackRaw);
+      const fallback = fallbackEntries
+        ?.find((entry) => textValue(entry?.provider, entry?.id)?.toLowerCase() === "antigravity");
+      const provider = codexBarEntryToProvider(fallback);
+      if (provider) {
+        providers.push(provider);
+        statuses.antigravity = "ok";
+      } else if (fallback?.error) {
+        console.error(`CodexBar Antigravity CLI 폴백 실패: ${fallback.error.message ?? "알 수 없는 오류"}`);
+        statuses.antigravity ??= "error";
+      }
+    } catch (e) {
+      console.error(`CodexBar Antigravity CLI 폴백 실패: ${e.message ?? e}`);
+      statuses.antigravity ??= "error";
+    }
+  }
   const complete = commandSucceeded && !bridgeEntries.some((entry) => entry?.error);
   return { providers, complete, statuses };
 }
