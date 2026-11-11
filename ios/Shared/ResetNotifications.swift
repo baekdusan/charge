@@ -140,22 +140,18 @@ enum ResetNotifications {
     ) -> [PlannedAlert] {
         var candidates: [PlannedAlert] = []
         for p in providers.hidingOutdatedCards(at: now) where !muted.contains(p.id) {
-            var windows: [(slot: String, name: String, window: RateWindow)] = []
-            if let s = p.session {
-                windows.append(("session", s.label ?? String(localized: "Session"), s))
-            }
-            if let w = p.weekly {
-                windows.append(("weekly", w.label ?? String(localized: "Weekly"), w))
-            }
-            for e in p.extras ?? [] {
-                windows.append(("extra-\(e.name)", e.name, e.window))
-            }
-            for (slot, name, window) in windows {
+            for w in p.windows {
+                let window = w.window
                 guard window.percent >= warnThreshold,
                       let reset = window.resetDate,
                       reset.timeIntervalSince(now) > 1 else { continue }
+                // 알림 문구는 지금까지 쓰던 그대로다: 세션, 주간은 label 우선(w.title),
+                // extra는 label이 아니라 원래 이름("Fable limit just reset.")이다
+                let name: String
+                if case .extra(let extraName) = w.slot { name = extraName } else { name = w.title }
                 candidates.append(PlannedAlert(
-                    id: "reset-\(p.uid)-\(slot)",
+                    // w.id는 "session", "weekly", "extra-<name>", 저장된 예약 id와 바이트 단위로 같아야 한다
+                    id: "reset-\(p.uid)-\(w.id)",
                     title: p.name,
                     body: String(localized: "\(name) limit just reset."),
                     reset: reset

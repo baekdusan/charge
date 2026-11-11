@@ -139,7 +139,7 @@ private func gaugeTint(_ percent: Double) -> Color {
     percent >= 90 ? .red : percent >= 70 ? .orange : ChargeTheme.accent
 }
 
-/// 지금 그릴 수 있는 창 한 줄 (세션, 주간). 창이 없는 프로바이더를 0%로 그리면
+/// 지금 그릴 수 있는 창 한 줄. 창이 없는 프로바이더를 0%로 그리면
 /// "한도를 안 썼다"는 거짓말이 되므로, 앱 카드처럼 줄 자체를 만들지 않는다.
 private struct ProviderRow: Identifiable {
     let id: String
@@ -147,24 +147,35 @@ private struct ProviderRow: Identifiable {
     let window: RateWindow
 }
 
+/// 칸 규칙(최대 두 칸, 세션 → 주간 → extras)은 공유 모델의 widgetWindows 하나다. 잠금화면 요약도 같은 칸을 쓴다.
 private func displayRows(_ provider: Provider, at now: Date) -> [ProviderRow] {
-    var rows: [ProviderRow] = []
-    if let s = provider.session, s.displayState(at: now) != nil {
-        rows.append(ProviderRow(id: "session", title: s.label ?? String(localized: "Session"), window: s))
-    }
-    if let w = provider.weekly, w.displayState(at: now) != nil {
-        rows.append(ProviderRow(id: "weekly", title: w.label ?? String(localized: "Weekly"), window: w))
-    }
-    return rows
+    provider.widgetWindows(at: now).map { ProviderRow(id: $0.id, title: $0.title, window: $0.window) }
 }
 
-private func limitStatusText(_ provider: Provider, at now: Date) -> String? {
-    guard let limit = provider.activeLimit(at: now) else { return nil }
+private func limitStatusText(_ limit: ProviderLimitState) -> String {
     let reached = limit.isProviderWide
         ? "\(limit.title) · \(String(localized: "Limit reached"))"
         : "\(limit.title) · \(String(localized: "Unavailable"))"
     guard let reset = limit.window.resetShort else { return reached }
     return "\(reached) · \(String(localized: "Resets in \(reset)"))"
+}
+
+/// 한도 배지 한 줄. 문구, 아이콘, 색을 activeLimit 한 값에서 같이 만든다(아이콘, 색 규칙은 ProviderLimitState.symbolName/tint).
+/// 축소 비율은 자리 크기마다 다르다: 칼럼은 0.68, small 단독은 0.64.
+private struct LimitStatusLabel: View {
+    let provider: Provider
+    let now: Date
+    let minimumScale: CGFloat
+
+    var body: some View {
+        if let limit = provider.activeLimit(at: now) {
+            Label(limitStatusText(limit), systemImage: limit.symbolName)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(limit.tint)
+                .lineLimit(1)
+                .minimumScaleFactor(minimumScale)
+        }
+    }
 }
 
 /// 세션 0%여도 주간 100%가 막고 있으면 위젯의 대표 숫자는 주간 한도가 되어야 한다.
@@ -209,14 +220,9 @@ private func oldestStale(_ providers: [Provider], at now: Date) -> CollectionFre
     return stale.min { ($0.ageDate ?? .distantFuture) < ($1.ageDate ?? .distantFuture) }
 }
 
-/// 나이 한 줄 문구, nil이면 줄을 만들지 않는다
+/// 나이 한 줄 문구, nil이면 줄을 만들지 않는다. 문구 규칙은 앱 카드와 같은 CollectionFreshness.ageText다
 private func ageLineText(_ providers: [Provider], at now: Date) -> String? {
-    guard let oldest = oldestStale(providers, at: now) else { return nil }
-    guard let date = oldest.ageDate else {
-        // 시각이 비상식적이라 나이를 못 말한다, 그래도 침묵하면 가장 낡은 값이 정상으로 읽힌다
-        return String(localized: "Data out of date")
-    }
-    return String(localized: "Data from \(date.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))")
+    oldestStale(providers, at: now)?.ageText
 }
 
 private struct WidgetUsageGauge: View {
@@ -343,14 +349,7 @@ private struct ProviderColumn: View {
                         .minimumScaleFactor(0.72)
                 }
             }
-            if let status = limitStatusText(provider, at: now) {
-                Label(status, systemImage: provider.providerWideLimit(at: now) == nil
-                      ? "exclamationmark.triangle.fill" : "lock.fill")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(provider.providerWideLimit(at: now) == nil ? .orange : .red)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.68)
-            }
+            LimitStatusLabel(provider: provider, now: now, minimumScale: 0.68)
             ForEach(displayRows(provider, at: now)) { row in
                 ProviderBar(
                     title: row.title,
@@ -372,6 +371,7 @@ struct ProviderWidgetView: View {
     @Environment(\.widgetFamily) private var family
 
     /// 그릴 창이 하나도 없는 프로바이더는 위젯에서도 뺀다, 앱 카드가 행을 생략하는 것과 같은 규칙
+    /// (extras만 그릴 수 있는 프로바이더도 앱 카드처럼 남는다)
     private func visibleProviders(at now: Date) -> [Provider] {
         entry.providers.filter { !displayRows($0, at: now).isEmpty }
     }
@@ -476,14 +476,7 @@ struct ProviderWidgetView: View {
                             .minimumScaleFactor(0.55)
                     }
                 }
-                if let status = limitStatusText(only, at: now) {
-                    Label(status, systemImage: only.providerWideLimit(at: now) == nil
-                          ? "exclamationmark.triangle.fill" : "lock.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(only.providerWideLimit(at: now) == nil ? .orange : .red)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.64)
-                }
+                LimitStatusLabel(provider: only, now: now, minimumScale: 0.64)
                 ForEach(compactRows(only, at: now)) { row in
                     Spacer(minLength: 2)
                     ProviderBar(
@@ -623,9 +616,9 @@ struct ProviderWidgetView: View {
 
     private func lockSummaryView(at now: Date) -> some View {
         let provider = mostUrgent(at: now)
-        let session = provider.flatMap { p in p.session.flatMap { p.displayState(of: $0, at: now) } }
-        let weekly = provider.flatMap { p in p.weekly.flatMap { p.displayState(of: $0, at: now) } }
-        // 한 프로바이더의 세션, 주간을 나란히 보여주는 패밀리, 둘 다 그 프로바이더의 신선도를 따른다
+        // 홈 위젯 줄과 같은 칸(widgetWindows): Ultra는 세션 대신 주간 + Fable 주간, 그릴 창이 하나뿐이면 숫자도 하나다
+        let slots = provider.map { $0.widgetWindows(at: now) } ?? []
+        // 한 프로바이더의 칸을 나란히 보여주는 패밀리, 모두 그 프로바이더의 신선도를 따른다
         let stale = provider.map { isStale($0, at: now) } ?? false
 
         return VStack(alignment: .leading, spacing: 3) {
@@ -654,16 +647,13 @@ struct ProviderWidgetView: View {
                 // 한 줄에 큰 숫자 둘을 나란히 두면 좁은 잠금화면 폭에서 "5…"로 잘린다 —
                 // 라벨 위 + 숫자 아래로 쌓고, 숫자는 잘리는 대신 축소되게 한다
                 HStack(alignment: .top, spacing: 12) {
-                    summaryStat(
-                        label: provider.session?.label ?? String(localized: "Session"),
-                        state: session,
-                        stale: stale
-                    )
-                    summaryStat(
-                        label: provider.weekly?.label ?? String(localized: "Weekly"),
-                        state: weekly,
-                        stale: stale
-                    )
+                    ForEach(slots) { slot in
+                        summaryStat(
+                            label: slot.title,
+                            state: provider.displayState(of: slot.window, at: now),
+                            stale: stale
+                        )
+                    }
                 }
             } else {
                 Text("No data").font(.caption2)
@@ -681,7 +671,7 @@ struct ProviderWidgetView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-            // 창이 없으면 자리표시자를 쓴다(0%가 아니다). 묵은 스냅샷이면 숫자를 흐리게 낮춘다
+            // 창이 없거나 값을 모르면 자리표시자를 쓴다(0%가 아니다). 묵은 스냅샷이면 숫자를 흐리게 낮춘다
             Text(percentText(state))
                 .font(.system(.title3, design: .rounded).bold().monospacedDigit())
                 .lineLimit(1)
@@ -725,7 +715,7 @@ struct ProviderWidget: Widget {
             ProviderWidgetView(entry: entry)
         }
         .configurationDisplayName("Provider Usage")
-        .description("Session and weekly usage with plan and time markers.")
+        .description("Usage limits with plan and time markers.")
         // 잠금화면 패밀리 유지: 예전 빌드에서 이 kind로 추가한 잠금화면 위젯이
         // 업데이트 후 무효화되지 않도록 한다 (신규 잠금화면 위젯은 전용 kind 사용)
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
@@ -742,7 +732,7 @@ struct ProviderRingLockWidget: Widget {
             ProviderWidgetView(entry: entry)
         }
         .configurationDisplayName("Limit Ring")
-        .description("Session usage in a compact ring.")
+        .description("Current limit in a compact ring.")
         .supportedFamilies([.accessoryCircular])
     }
 }
@@ -757,7 +747,7 @@ struct ProviderNumberLockWidget: Widget {
             ProviderWidgetView(entry: entry)
         }
         .configurationDisplayName("Limit Number")
-        .description("Session usage as a large percentage.")
+        .description("Current limit as a large percentage.")
         .supportedFamilies([.accessoryCircular])
     }
 }
@@ -787,7 +777,7 @@ struct ProviderSummaryLockWidget: Widget {
             ProviderWidgetView(entry: entry)
         }
         .configurationDisplayName("Usage Summary")
-        .description("Session and weekly percentages of your busiest provider.")
+        .description("Two limits of your busiest provider.")
         .supportedFamilies([.accessoryRectangular])
     }
 }

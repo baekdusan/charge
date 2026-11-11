@@ -56,7 +56,7 @@ You're deep in a Claude Code session and the questions creep in: *How much of my
 - **🔋 Per-provider rate-limit gauges**: Claude and Codex out of the box, plus Gemini, Cursor, Copilot, OpenRouter and more via the macOS [CodexBar](https://github.com/steipete/CodexBar) bridge. Reset countdowns and window-elapsed markers included.
 - **⚡ Burn-rate prediction** warns *before* you hit a wall: “at this pace, you'll run out in ~4h.”
 - **💸 Cost dashboard**: today / 7-day / 30-day spend and tokens, a daily chart, and a per-model cost ranking.
-- **🏷️ Plan badges & account separation**: auto-detects your plan (Max 20x, Education, ...) and splits usage into per-account cards when machines use different logins.
+- **🏷️ Plan badges & account separation**: auto-detects your plan (Ultra, Max, Education, ...) and splits usage into per-account cards when machines use different logins.
 - **🖥️ Connected-computer management**: see which machine last reported and when, get a heads-up when one stops collecting, swipe to unpair.
 - **🔔 Reset notifications**: a local iOS notification the moment a window you're watching resets. No server push required, and you can toggle per provider.
 - **🟢 Live 5-hour block**: real-time spend, hourly burn ($/h), and a projected window total.

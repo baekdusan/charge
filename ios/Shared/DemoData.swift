@@ -31,36 +31,34 @@ enum DemoData {
         // -charge-demo-quota-protection: Claude 주간 한도 100%, 어제와 오늘을 모두 덮는 차단 구간, 그 이틀의
         // Claude 사용량 0. Claude 탭의 스트릭에 "오늘 스트릭 보호됨"과 보호일 칸이 그려진다.
         let quotaProtection = args.contains("-charge-demo-quota-protection")
-        // -charge-demo-stale-claude: 사흘 전에 수집된 Claude 스냅샷, 리셋 시각 없는 세션 창.
-        // 세션 게이지가 0%가 아니라 값 미상("최근 데이터 없음")으로 그려진다.
+        // -charge-demo-stale-claude: 사흘 전에 수집된 Claude 스냅샷, 리셋 시각 없는 Fable 주간 창.
+        // 그 게이지가 0%가 아니라 값 미상("최근 데이터 없음")으로 그려진다.
         let staleClaude = args.contains("-charge-demo-stale-claude")
 
-        // 세션 창: 5시간 중 3시간 경과(60%), 주간 창: 7일 중 4.2일 경과
-        var claudeSession = RateWindow(percent: 34, resetsAt: at(2 * 3600), windowMinutes: 300)
+        // Claude는 Ultra 모양이다: 5시간 세션 창이 없고(session: null) 주간과 모델 범위 Fable 주간만 온다.
+        // 수집기가 실제로 보내는 모양 그대로다(extra 이름 "Fable", label "Fable weekly").
+        // 주간 창: 7일 중 4.2일 경과
         var claudeWeekly = RateWindow(percent: 62, resetsAt: at(2.8 * 86400), windowMinutes: 10_080)
+        var fableWeekly = RateWindow(percent: 41, resetsAt: at(2.8 * 86400), windowMinutes: 10_080, label: "Fable weekly")
         var claudeCollectedAt = at(-90)
         let blockedWeeklyReset = at(1.3 * 86400)
         if quotaProtection {
-            // 주간 한도에 막히면 세션은 쉬는 중이라 리셋 시각이 없다(수집기의 five_hour 창)
-            claudeSession = RateWindow(percent: 0, resetsAt: nil, windowMinutes: 300)
+            // 세션 창이 없으니 계정 전체를 막는 건 주간 하나다
             claudeWeekly = RateWindow(percent: 100, resetsAt: blockedWeeklyReset, windowMinutes: 10_080)
         }
         if staleClaude {
-            // 묵은 스냅샷 + 리셋 시각 없는 세션 = 값 미상. 주간은 리셋 시각을 알아 흐린 숫자로 남는다
-            claudeSession = RateWindow(percent: claudeSession.percent, resetsAt: nil, windowMinutes: 300)
+            // 묵은 스냅샷 + 리셋 시각 없는 창 = 값 미상. 주간은 리셋 시각을 알아 흐린 숫자로 남는다
+            fableWeekly = RateWindow(percent: fableWeekly.percent, resetsAt: nil, windowMinutes: 10_080, label: "Fable weekly")
             claudeCollectedAt = at(-3 * 86400)
         }
 
         let claude = Provider(
             id: "claude",
             name: "Claude",
-            plan: "Max 20x",
-            session: claudeSession,
+            plan: "Ultra",
+            session: nil,
             weekly: claudeWeekly,
-            extras: [ExtraWindow(
-                name: "Fable weekly",
-                window: RateWindow(percent: 41, resetsAt: at(2.8 * 86400), windowMinutes: 10_080)
-            )],
+            extras: [ExtraWindow(name: "Fable", window: fableWeekly)],
             status: ProviderStatus(indicator: "none", description: nil),
             account: "demo-claude",
             deviceLabel: "Demo-MacBookPro.local",

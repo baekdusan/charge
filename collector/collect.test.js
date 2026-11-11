@@ -179,6 +179,33 @@ test("T07 codexBarEntryToProvider: 창 매핑·중복 길이 라벨·계정 비�
   assert.equal(provider.collector_source, "codexbar");
 });
 
+test("T07c codexBarEntryToProvider: 길이 미상(null/0)은 중복 묶음이 아니고, 버려질 칸도 중복 길이로 센다", () => {
+  const unknown = C.codexBarEntryToProvider({
+    provider: "gemini",
+    usage: {
+      primary: { usedPercent: 11, resetsAt: futureReset, windowMinutes: null },
+      secondary: { usedPercent: 22, resetsAt: futureReset, windowMinutes: 0 },
+      tertiary: { usedPercent: 33, resetsAt: futureReset, windowMinutes: 300 },
+    },
+  });
+  assert.equal(unknown.session.label, "Primary");
+  assert.equal(unknown.weekly.label, "Secondary");
+  assert.equal(unknown.extras[0].window.label, "Session");
+  assert.equal(unknown.session.window_minutes, null);
+
+  // secondary는 percent가 없어 버려지지만 같은 1440 길이로 세어 primary가 'Primary daily'가 된다
+  const dropped = C.codexBarEntryToProvider({
+    provider: "gemini",
+    usage: {
+      primary: { usedPercent: 11, resetsAt: futureReset, windowMinutes: 1440 },
+      secondary: { usedPercent: null, resetsAt: futureReset, windowMinutes: 1440 },
+    },
+  });
+  assert.equal(dropped.weekly, null);
+  assert.equal(dropped.session.label, "Primary daily");
+  assert.equal(dropped.session.window_minutes, 1440);
+});
+
 test("T07b codexBarEntryToProvider: 불투명 계정 ID가 이메일보다 우선(사전 대입 방지)", () => {
   const email = "person@example.com";
   const accountId = "acct_9f3c1e77-opaque";
@@ -332,7 +359,7 @@ test("T09d claudeProvider: 401→auth_expired, 5xx→error, 성공→ok+collecte
   const rOk = await C.claudeProvider({ fetchFn: okFetch, loadCredentials: creds });
   assert.equal(rOk.status, "ok");
   assert.equal(rOk.provider.session.percent, 7);
-  assert.equal(rOk.provider.plan, "Max 20x");
+  assert.equal(rOk.provider.plan, "Ultra"); // 옛 Max 20x는 이제 Ultra
   assert.equal(rOk.provider.account, C.accountHash("user-uuid"));
   const t = new Date(rOk.provider.collected_at).getTime();
   assert.ok(t >= before && t <= Date.now());
@@ -345,6 +372,25 @@ test("T09d claudeProvider: 401→auth_expired, 5xx→error, 성공→ok+collecte
   });
   assert.equal(missing.provider, null);
   assert.equal(missing.status, null);
+});
+
+test("T09h claudeProvider: 바뀐 요금제 이름 (max_20x→Ultra, max_5x→Max, ultra 티어, subscriptionType만)", async () => {
+  const okFetch = async (url) =>
+    String(url).includes("/usage")
+      ? { ok: true, status: 200, json: async () => ({ seven_day: { utilization: 30, resets_at: futureReset }, limits: [] }) }
+      : { ok: true, status: 200, json: async () => ({ account: { uuid: "user-uuid" } }) };
+  const planFor = async (oauth) => (await C.claudeProvider({
+    fetchFn: okFetch, loadCredentials: async () => ({ claudeAiOauth: { accessToken: "tok", ...oauth } }),
+  })).provider.plan;
+  assert.equal(await planFor({ rateLimitTier: "default_claude_max_20x", subscriptionType: "max" }), "Ultra");
+  assert.equal(await planFor({ rateLimitTier: "default_claude_max_5x", subscriptionType: "max" }), "Max");
+  assert.equal(await planFor({ rateLimitTier: "default_claude_ultra", subscriptionType: "max" }), "Ultra");
+  assert.equal(await planFor({ rateLimitTier: "default_claude_max_10x" }), "Max 10x"); // 모르는 배수는 그대로
+  assert.equal(await planFor({ subscriptionType: "max" }), "Max");
+  assert.equal(await planFor({ subscriptionType: "pro" }), "Pro");
+  assert.equal(await planFor({ subscriptionType: "ultra" }), "Ultra");
+  assert.equal(await planFor({ rateLimitTier: "default_claude_pro", subscriptionType: "pro" }), "Pro");
+  assert.equal(await planFor({}), null);
 });
 
 test("Claude detection distinguishes missing login, absent tools, 403 and 429", async () => {
@@ -502,6 +548,14 @@ test("Collection health persists real attempts and resets on recovery, gaps and 
     assert.match(record({ claude: "error" }, 70).claude, /failures=1;/);
     assert.equal(record(null, 75), null);
     assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")).failures, {});
+    // JSON null·숫자도 깨진 파일처럼 새로 센다 (던지지 않는다)
+    for (const content of ["null", "5"]) {
+      fs.writeFileSync(file, content);
+      assert.match(record({ claude: "error" }, 80).claude, /failures=1;/);
+    }
+    // 임시 파일에 쓰고 이름을 바꿔 교체하므로 .tmp가 남지 않고, 권한은 소유자 전용이다
+    assert.deepEqual(fs.readdirSync(dir).filter((name) => name.endsWith(".tmp")), []);
+    if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

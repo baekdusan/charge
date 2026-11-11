@@ -279,6 +279,14 @@ function durationLabel(minutes) {
   return null;
 }
 
+// CodexBar 창 길이(분). 이 한 값이 저장되는 window_minutes이자 같은 길이 라벨 중복 판정의 키다.
+// percent와 달리 평범한 ?? 체인이다: windowMinutes가 ""면 뒤 필드로 넘어가지 않고 미상(null)이 된다.
+function windowMinutesOf(window) {
+  const raw = window.windowMinutes ?? window.window_minutes ?? window.durationMinutes;
+  const parsed = raw == null ? null : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
 function explicitWindowLabel(window) {
   const value = window?.label ?? window?.title ?? window?.displayName ?? window?.name ?? window?.limitName;
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -294,9 +302,7 @@ function normalizeRateWindow(window, slot, duplicateDuration = false, forcedLabe
     .map(percentValue)
     .find((value) => value !== null);
   if (percent === undefined) return null;
-  const rawMinutes = window.windowMinutes ?? window.window_minutes ?? window.durationMinutes;
-  const parsedMinutes = rawMinutes == null ? null : Number(rawMinutes);
-  const minutes = Number.isFinite(parsedMinutes) && parsedMinutes > 0 ? parsedMinutes : null;
+  const minutes = windowMinutesOf(window);
   const baseLabel = durationLabel(minutes);
   const slotLabel = slot[0].toUpperCase() + slot.slice(1);
   const label = forcedLabel
@@ -922,13 +928,18 @@ async function claudeProvider({
   try {
     const oauth = cred.claudeAiOauth ?? cred;
     const token = oauth.accessToken;
-    // rateLimitTier "default_claude_max_20x" → "Max 20x", 없으면 subscriptionType "max" → "Max"
-    const tier = /max_(\d+)x/.exec(oauth.rateLimitTier ?? "");
-    const plan = tier
-      ? `Max ${tier[1]}x`
-      : oauth.subscriptionType
-        ? oauth.subscriptionType[0].toUpperCase() + oauth.subscriptionType.slice(1)
-        : null;
+    // Anthropic이 요금제 이름을 바꿨다: 옛 Max 20x는 이제 Ultra, Max 5x는 그냥 Max다.
+    // rateLimitTier "default_claude_max_20x" → "Ultra", "..._max_5x" → "Max", "ultra"가 들어 있으면 "Ultra",
+    // 모르는 max_<n>x는 "Max <n>x" 그대로 둔다. 티어가 없으면 subscriptionType "max" → "Max"
+    const rateLimitTier = oauth.rateLimitTier ?? "";
+    const tier = /max_(\d+)x/.exec(rateLimitTier);
+    const plan = /ultra/i.test(rateLimitTier) || tier?.[1] === "20"
+      ? "Ultra"
+      : tier
+        ? tier[1] === "5" ? "Max" : `Max ${tier[1]}x`
+        : oauth.subscriptionType
+          ? oauth.subscriptionType[0].toUpperCase() + oauth.subscriptionType.slice(1)
+          : null;
     // 자격증명 키: 리프레시 토큰(없으면 액세스 토큰)의 해시. 계정 캐시와 429 게이트가 쓰고, 앞 8자는 로그의 세대 표시다.
     const credential = credentialKey(typeof oauth.refreshToken === "string" && oauth.refreshToken ? oauth.refreshToken : token);
     const generation = credential ? credential.slice(0, 8) : null;
@@ -1338,20 +1349,18 @@ function codexBarEntryToProvider(entry) {
     : entry.identity && typeof entry.identity === "object" ? entry.identity : {};
   const slots = ["primary", "secondary", "tertiary"]
     .map((slot) => ({ slot, value: usage[slot] ?? entry[slot] }))
-    .filter(({ value }) => value && typeof value === "object");
+    .filter(({ value }) => value && typeof value === "object")
+    .map((item) => ({ ...item, minutes: windowMinutesOf(item.value) }));
+  // 중복 길이는 나중에 percent가 없어 버려질 칸까지 모든 칸에서 센다
   const durationCounts = new Map();
-  for (const { value } of slots) {
-    const minutes = Number(value.windowMinutes ?? value.window_minutes ?? value.durationMinutes);
-    if (Number.isFinite(minutes)) durationCounts.set(minutes, (durationCounts.get(minutes) ?? 0) + 1);
+  for (const { minutes } of slots) {
+    if (minutes !== null) durationCounts.set(minutes, (durationCounts.get(minutes) ?? 0) + 1);
   }
   const normalizedWindows = slots
-    .map(({ slot, value }) => {
-      const minutes = Number(value.windowMinutes ?? value.window_minutes ?? value.durationMinutes);
-      return {
-        slot,
-        window: normalizeRateWindow(value, slot, (durationCounts.get(minutes) ?? 0) > 1),
-      };
-    })
+    .map(({ slot, value, minutes }) => ({
+      slot,
+      window: normalizeRateWindow(value, slot, minutes !== null && durationCounts.get(minutes) > 1),
+    }))
     .filter(({ window }) => window);
   const primary = normalizedWindows.find(({ slot }) => slot === "primary")?.window ?? null;
   const secondary = normalizedWindows.find(({ slot }) => slot === "secondary")?.window ?? null;
@@ -1651,23 +1660,13 @@ function advanceCollectionHealth(statuses, previous = {}, now = Date.now(), held
 function recordCollectionHealth(statuses, {
   file = HEALTH_FILE, scope = null, now = Date.now(), persist = true, held = [],
 } = {}) {
-  let previous = {};
-  try {
-    const saved = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (saved.scope === scope) previous = saved.failures;
-  } catch {}
+  // readStateFile은 JSON null·숫자도 null로 돌려주므로 ?.가 꼭 필요하다 (예전엔 catch가 삼켰다)
+  const saved = readStateFile(file);
+  const previous = saved?.scope === scope ? saved.failures : {};
   const next = advanceCollectionHealth(statuses, previous, now, held);
   if (persist) {
     // Save independently of the payload: an upload failure must not erase attempts.
-    const temporary = `${file}.${process.pid}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify({ scope, failures: next.failures }), { mode: 0o600 });
-      fs.renameSync(temporary, file);
-    } catch {
-      console.error("수집 실패 횟수를 저장하지 못했습니다");
-    } finally {
-      try { fs.rmSync(temporary, { force: true }); } catch {}
-    }
+    if (!writeStateFile(file, { scope, failures: next.failures })) console.error("수집 실패 횟수를 저장하지 못했습니다");
   }
   return next.statuses;
 }

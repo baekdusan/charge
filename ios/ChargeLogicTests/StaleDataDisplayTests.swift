@@ -477,6 +477,70 @@ final class StaleDataDisplayTests: XCTestCase {
         XCTAssertTrue(ResetNotifications.plannedAlerts(providers: [fresh], warnThreshold: 96, muted: [], now: now).isEmpty)
     }
 
+    /// Ultra 모양(세션 없음, 주간 + 모델 범위 Fable 주간). 알림 id는 저장된 예약 id와 같아야 하고,
+    /// extra의 문구는 label("Fable weekly")이 아니라 원래 이름("Fable")을 쓴다. 세션, 주간은 label 우선이다.
+    func testResetAlertsForUltraShapeKeepIdsAndBodies() {
+        let weeklyReset = now.addingTimeInterval(2 * 86400)
+        let fableReset = now.addingTimeInterval(3 * 86400)
+        let ultra = card(
+            "ultra",
+            collectedAt: ago(120),
+            session: nil,
+            weekly: RateWindow(percent: 80, resetsAt: stamp(weeklyReset), windowMinutes: 10_080, label: "All models"),
+            extras: [ExtraWindow(
+                name: "Fable",
+                window: RateWindow(percent: 100, resetsAt: stamp(fableReset), windowMinutes: 10_080, label: "Fable weekly")
+            )]
+        )
+
+        let planned = ResetNotifications.plannedAlerts(providers: [ultra], warnThreshold: 70, muted: [], now: now)
+        XCTAssertEqual(planned.map(\.id), ["reset-claude#ultra-weekly", "reset-claude#ultra-extra-Fable"])
+        XCTAssertEqual(planned.map(\.title), ["Claude", "Claude"])
+        XCTAssertEqual(planned.map(\.reset), [weeklyReset, fableReset])
+        XCTAssertEqual(planned.map(\.body), [
+            String(localized: "\("All models") limit just reset."),
+            String(localized: "\("Fable") limit just reset."),
+        ])
+        XCTAssertFalse(planned[1].body.contains("Fable weekly"))
+
+        // label 없는 세션, 주간은 기본 이름으로 말한다
+        let plain = card(
+            "plain",
+            collectedAt: ago(120),
+            session: RateWindow(percent: 90, resetsAt: stamp(now.addingTimeInterval(3600)), windowMinutes: 300),
+            weekly: RateWindow(percent: 90, resetsAt: stamp(weeklyReset), windowMinutes: 10_080)
+        )
+        let plainPlanned = ResetNotifications.plannedAlerts(providers: [plain], warnThreshold: 70, muted: [], now: now)
+        XCTAssertEqual(plainPlanned.map(\.id), ["reset-claude#plain-session", "reset-claude#plain-weekly"])
+        XCTAssertEqual(plainPlanned.map(\.body), [
+            String(localized: "\(String(localized: "Session")) limit just reset."),
+            String(localized: "\(String(localized: "Weekly")) limit just reset."),
+        ])
+    }
+
+    // MARK: 나이 한 줄 문구
+
+    /// 묵은 스냅샷은 나이를, 시각을 못 믿는 스냅샷은 "오래된 데이터"만, 신선하거나 미상이면 아무 말도 하지 않는다.
+    func testCollectionAgeText() {
+        let d = ago(3 * 3600)
+        let relative = d.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated))
+        let staleText = CollectionFreshness.stale(d).ageText
+        XCTAssertEqual(staleText, String(localized: "Data from \(relative)"))
+        XCTAssertTrue(staleText?.contains(relative) == true)
+
+        XCTAssertEqual(CollectionFreshness.untrusted.ageText, String(localized: "Data out of date"))
+        XCTAssertNil(CollectionFreshness.fresh(ago(60)).ageText)
+        XCTAssertNil(CollectionFreshness.unknown.ageText)
+
+        // 프로바이더 판정에서 그대로 이어진다: 40분 묵음 = 나이, 미래 이틀 = 믿을 수 없음, 수집 시각 없음 = 침묵
+        XCTAssertNotNil(provider(weekly: nil, collectedAt: ago(40 * 60)).freshness(at: now).ageText)
+        XCTAssertEqual(
+            provider(weekly: nil, collectedAt: now.addingTimeInterval(2 * 86400)).freshness(at: now).ageText,
+            String(localized: "Data out of date")
+        )
+        XCTAssertNil(provider(weekly: nil, collectedAt: nil).freshness(at: now).ageText)
+    }
+
     // MARK: A1 대표 창
 
     /// 쉬고 있는 5시간 세션은 리셋 시각이 없다(수집기의 five_hour 창). 요청 제한 대기로 스냅샷이 20분을 넘기면

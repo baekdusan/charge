@@ -131,19 +131,7 @@ enum ChargeAPI {
         let updatedAt: String?
         var collectedAt: String? = nil
 
-        private static let isoFrac: ISO8601DateFormatter = {
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return f
-        }()
-        private static let iso = ISO8601DateFormatter()
-
-        private static func parse(_ s: String?) -> Date? {
-            guard let s else { return nil }
-            return isoFrac.date(from: s) ?? iso.date(from: s)
-        }
-
-        var updatedDate: Date? { Self.parse(updatedAt) }
+        var updatedDate: Date? { ChargeDate.instant(updatedAt) }
     }
 
     /// 새 백엔드는 기기별 원본 관측을 보존한다. payload는 수집기가 보낸 Provider 한 건이며
@@ -298,16 +286,7 @@ enum ChargeAPI {
     ) -> [Provider] {
         let deviceByID = Dictionary(uniqueKeysWithValues: devices.map { ($0.id, $0) })
         let displayLabelByID = deviceLabelsByID(devices)
-        let isoFrac: ISO8601DateFormatter = {
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return f
-        }()
-        let iso = ISO8601DateFormatter()
-        func date(_ value: String?) -> Date? {
-            guard let value else { return nil }
-            return isoFrac.date(from: value) ?? iso.date(from: value)
-        }
+        func date(_ value: String?) -> Date? { ChargeDate.instant(value) }
         func key(_ provider: String, _ account: String?) -> String {
             "\(provider)\u{0}\(account ?? "")"
         }

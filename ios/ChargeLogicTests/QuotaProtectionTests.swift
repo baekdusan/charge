@@ -317,4 +317,204 @@ final class QuotaProtectionTests: XCTestCase {
         let now = date("2026-08-15T16:00:00Z")
         XCTAssertNil(provider(session: nil, weekly: nil).primaryDisplayWindow(at: now))
     }
+
+    // MARK: 창 목록 (세션 → 주간 → extras 순서와 이름, 범위)
+
+    /// 순서가 strictest()의 동률과 대표 창을 정하고, id는 저장된 리셋 알림 id와 위젯 줄 id에 그대로 쓰인다.
+    func testWindowsListOrderIdsTitlesAndScope() {
+        let value = provider(
+            session: RateWindow(percent: 10, resetsAt: "2026-08-15T18:00:00Z", windowMinutes: 300),
+            weekly: RateWindow(percent: 20, resetsAt: "2026-08-20T15:00:00Z", windowMinutes: 10_080, label: "All models"),
+            extras: [ExtraWindow(
+                name: "Fable",
+                window: RateWindow(percent: 30, resetsAt: "2026-08-20T15:00:00Z", windowMinutes: 10_080, label: "Fable weekly")
+            )]
+        )
+
+        let windows = value.windows
+        XCTAssertEqual(windows.map(\.id), ["session", "weekly", "extra-Fable"])
+        XCTAssertEqual(windows.map(\.title), [String(localized: "Session"), "All models", "Fable weekly"])
+        XCTAssertEqual(windows.map(\.isProviderWide), [true, true, false])
+        XCTAssertEqual(windows.map(\.window.percent), [10, 20, 30])
+        XCTAssertEqual(windows.map(\.slot), [.session, .weekly, .extra(name: "Fable")])
+    }
+
+    /// label이 없는 extra는 이름으로, 없는 창은 항목 자체가 없다
+    func testWindowsListFallsBackToNameAndSkipsMissingWindows() {
+        let value = provider(
+            session: nil,
+            weekly: RateWindow(percent: 20, resetsAt: nil),
+            extras: [ExtraWindow(name: "Opus", window: RateWindow(percent: 5, resetsAt: nil))]
+        )
+        XCTAssertEqual(value.windows.map(\.id), ["weekly", "extra-Opus"])
+        XCTAssertEqual(value.windows.map(\.title), [String(localized: "Weekly"), "Opus"])
+    }
+
+    /// Ultra 플랜은 5시간 세션 창이 없고(session: null), 주간과 모델 범위 Fable 주간만 온다.
+    /// Fable 100%는 계정 전체 차단이 아니고, 대표 창은 주간이다.
+    func testUltraShapeWithoutSessionUsesWeeklyAndScopesFable() {
+        let now = date("2026-11-11T06:00:00Z")
+        let value = provider(
+            session: nil,
+            weekly: RateWindow(percent: 65, resetsAt: "2026-11-15T15:00:00.621900+00:00", windowMinutes: 10_080),
+            extras: [ExtraWindow(
+                name: "Fable",
+                window: RateWindow(
+                    percent: 100,
+                    resetsAt: "2026-11-15T15:00:00.621900+00:00",
+                    windowMinutes: 10_080,
+                    label: "Fable weekly"
+                )
+            )]
+        )
+
+        XCTAssertEqual(value.primaryDisplayWindow(at: now)?.id, "weekly")
+        XCTAssertEqual(value.primaryDisplayWindow(at: now)?.window.percent, 65)
+        XCTAssertNil(value.providerWideLimit(at: now))
+        let scoped = value.scopedLimit(at: now)
+        XCTAssertEqual(scoped?.title, "Fable weekly")
+        XCTAssertEqual(scoped?.isProviderWide, false)
+        XCTAssertEqual(value.activeLimit(at: now)?.title, "Fable weekly")
+        XCTAssertEqual(
+            value.drawableWindows(at: now, stale: false).map(\.window.id),
+            ["weekly", "extra-Fable"]
+        )
+    }
+
+    /// 대표 창 규칙("값을 아는 첫 계정 전체 창, 없으면 첫 창")이 예전 세션/주간 분기와 모든 조합에서 같은 답을 내는지.
+    func testPrimaryWindowMatchesSessionWeeklyBranchesForEveryCombination() {
+        let now = date("2026-08-15T16:00:00Z")
+        enum Kind: CaseIterable { case missing, undrawable, unknown, known }
+        func window(_ kind: Kind) -> RateWindow? {
+            switch kind {
+            case .missing: return nil
+            // 리셋이 지났는데 창 길이를 몰라 다음 창을 추정할 수 없다
+            case .undrawable: return RateWindow(percent: 40, resetsAt: "2026-08-15T10:00:00Z")
+            // 묵은 스냅샷 + 리셋 시각 없음
+            case .unknown: return RateWindow(percent: 0, resetsAt: nil, windowMinutes: 300)
+            case .known: return RateWindow(percent: 30, resetsAt: "2026-08-15T18:00:00Z", windowMinutes: 300)
+            }
+        }
+        for s in Kind.allCases {
+            for w in Kind.allCases {
+                var value = provider(session: window(s), weekly: window(w))
+                value.collectedAt = "2026-08-15T15:20:00Z"  // 40분 묵음
+                let sessionDrawable = s == .unknown || s == .known
+                let weeklyDrawable = w == .unknown || w == .known
+                let expected: String?
+                if sessionDrawable && !(s == .unknown && w == .known) {
+                    expected = "session"
+                } else if weeklyDrawable {
+                    expected = "weekly"
+                } else {
+                    expected = nil
+                }
+                XCTAssertEqual(value.primaryDisplayWindow(at: now)?.id, expected, "session \(s), weekly \(w)")
+            }
+        }
+    }
+
+    // MARK: 위젯 칸 (그릴 수 있는 창을 세션 → 주간 → extras 순서로 최대 두 칸)
+
+    /// Ultra(세션 없음)는 빈 "Session -" 칸 대신 주간 + Fable 주간을 그린다
+    func testWidgetWindowsForUltraAreWeeklyThenFable() {
+        let now = date("2026-11-11T06:00:00Z")
+        let value = provider(
+            session: nil,
+            weekly: RateWindow(percent: 65, resetsAt: "2026-11-15T15:00:00.621900+00:00", windowMinutes: 10_080),
+            extras: [ExtraWindow(
+                name: "Fable",
+                window: RateWindow(percent: 40, resetsAt: "2026-11-15T15:00:00Z", windowMinutes: 10_080, label: "Fable weekly")
+            )]
+        )
+        XCTAssertEqual(value.widgetWindows(at: now).map(\.id), ["weekly", "extra-Fable"])
+        XCTAssertEqual(value.widgetWindows(at: now).map(\.title), [String(localized: "Weekly"), "Fable weekly"])
+        XCTAssertEqual(value.widgetWindows(at: now, limit: 1).map(\.id), ["weekly"])
+    }
+
+    /// Pro/Max는 extras가 있어도 세션 + 주간 그대로다
+    func testWidgetWindowsForProAreSessionThenWeekly() {
+        let now = date("2026-08-15T16:00:00Z")
+        let value = provider(
+            session: RateWindow(percent: 10, resetsAt: "2026-08-15T18:00:00Z", windowMinutes: 300),
+            weekly: RateWindow(percent: 20, resetsAt: "2026-08-20T15:00:00Z", windowMinutes: 10_080),
+            extras: [ExtraWindow(name: "Fable", window: RateWindow(percent: 30, resetsAt: "2026-08-20T15:00:00Z", windowMinutes: 10_080))]
+        )
+        XCTAssertEqual(value.widgetWindows(at: now).map(\.id), ["session", "weekly"])
+        XCTAssertEqual(value.widgetWindows(at: now).map(\.title), [String(localized: "Session"), String(localized: "Weekly")])
+    }
+
+    /// 리셋이 지났는데 창 길이를 몰라 추정할 수 없는 세션은 칸을 차지하지 않고, 다음 창이 올라온다.
+    /// 값 미상(묵은 스냅샷 + 리셋 시각 없음)인 창은 그릴 수 있으니 칸을 그대로 차지한다.
+    func testWidgetWindowsSkipUndrawableButKeepUnknown() {
+        let now = date("2026-08-15T16:00:00Z")
+        let fable = ExtraWindow(name: "Fable", window: RateWindow(percent: 30, resetsAt: "2026-08-20T15:00:00Z", windowMinutes: 10_080))
+        var undrawable = provider(
+            session: RateWindow(percent: 40, resetsAt: "2026-08-15T10:00:00Z"),
+            weekly: RateWindow(percent: 20, resetsAt: "2026-08-20T15:00:00Z", windowMinutes: 10_080),
+            extras: [fable]
+        )
+        undrawable.collectedAt = "2026-08-15T15:20:00Z"  // 40분 묵음
+        XCTAssertEqual(undrawable.widgetWindows(at: now).map(\.id), ["weekly", "extra-Fable"])
+
+        var unknown = provider(
+            session: RateWindow(percent: 0, resetsAt: nil, windowMinutes: 300),
+            weekly: RateWindow(percent: 20, resetsAt: "2026-08-20T15:00:00Z", windowMinutes: 10_080),
+            extras: [fable]
+        )
+        unknown.collectedAt = "2026-08-15T15:20:00Z"
+        XCTAssertEqual(unknown.widgetWindows(at: now).map(\.id), ["session", "weekly"])
+        XCTAssertEqual(unknown.displayState(of: unknown.widgetWindows(at: now)[0].window, at: now)?.isUnknown, true)
+    }
+
+    /// extras만 그릴 수 있는 프로바이더도 위젯에서 빠지지 않는다(앱 카드와 같다)
+    func testWidgetWindowsForExtrasOnlyProvider() {
+        let now = date("2026-08-15T16:00:00Z")
+        let value = provider(
+            session: nil,
+            weekly: RateWindow(percent: 20, resetsAt: "2026-08-15T10:00:00Z"),  // 추정 불가
+            extras: [ExtraWindow(name: "Opus", window: RateWindow(percent: 5, resetsAt: nil))]
+        )
+        XCTAssertEqual(value.widgetWindows(at: now).map(\.id), ["extra-Opus"])
+        XCTAssertEqual(value.widgetWindows(at: now).map(\.title), ["Opus"])
+        XCTAssertTrue(provider(session: nil, weekly: nil).widgetWindows(at: now).isEmpty)
+        // 홈 위젯이 그리는 프로바이더는 대표 창 화면(링, 막대, 인라인)에서도 사라지지 않는다
+        XCTAssertEqual(value.primaryDisplayWindow(at: now)?.id, "extra-Opus")
+        XCTAssertNil(provider(session: nil, weekly: nil).primaryDisplayWindow(at: now))
+        // 계정 전체 창이 하나라도 그려지면 extras는 대표가 되지 않는다(Fable 100%여도 주간이 대표)
+        let ultra = provider(
+            session: nil,
+            weekly: RateWindow(percent: 40, resetsAt: "2026-08-20T10:00:00Z"),
+            extras: [ExtraWindow(name: "Fable", window: RateWindow(percent: 90, resetsAt: "2026-08-20T10:00:00Z"))]
+        )
+        XCTAssertEqual(ultra.primaryDisplayWindow(at: now)?.id, "weekly")
+    }
+
+    // MARK: ISO-8601 시각
+
+    func testInstantParsesFractionalAndPlainTimestamps() {
+        let plain = ChargeDate.instant("2026-11-15T15:00:00Z")
+        XCTAssertEqual(plain, date("2026-11-15T15:00:00Z"))
+        let fractional = ChargeDate.instant("2026-11-15T15:00:00.621900+00:00")
+        XCTAssertNotNil(fractional)
+        XCTAssertEqual(
+            fractional?.timeIntervalSince(date("2026-11-15T15:00:00Z")) ?? -1,
+            0.6219,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(ChargeDate.instant("2026-11-15T15:00:00+00:00"), date("2026-11-15T15:00:00Z"))
+        XCTAssertNil(ChargeDate.instant(nil))
+        XCTAssertNil(ChargeDate.instant(""))
+        XCTAssertNil(ChargeDate.instant("x"))
+    }
+
+    /// 추정 창의 resetsAt은 소수점 형식으로 쓴다(위젯 지문이 이 문자열을 비교한다), 다시 읽어도 같은 시각이다.
+    func testInferredResetIsWrittenFractionalAndRoundTrips() {
+        XCTAssertEqual(ChargeDate.isoString(Date(timeIntervalSince1970: 0)), "1970-01-01T00:00:00.000Z")
+        let now = date("2026-08-15T16:00:00Z")
+        let passed = RateWindow(percent: 80, resetsAt: "2026-08-15T15:00:00Z", windowMinutes: 300)
+        let inferred = passed.displayState(at: now)?.window
+        XCTAssertEqual(inferred?.resetsAt, "2026-08-15T20:00:00.000Z")
+        XCTAssertEqual(inferred?.resetDate, date("2026-08-15T20:00:00Z"))
+    }
 }

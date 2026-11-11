@@ -17,9 +17,15 @@ final class DemoFixtureTests: XCTestCase {
     func testDefaultDemoDataIsUnchangedWithoutFixtureArguments() throws {
         let payload = DemoData.make(now: now, arguments: [])
         let claude = try XCTUnwrap(claude(payload))
-        XCTAssertEqual(claude.session?.percent, 34)
-        XCTAssertNotNil(claude.session?.resetsAt)
+        // Ultra 모양: 세션 창 없음, 주간 + 모델 범위 Fable 주간(수집기와 같은 이름, label)
+        XCTAssertEqual(claude.plan, "Ultra")
+        XCTAssertNil(claude.session)
         XCTAssertEqual(claude.weekly?.percent, 62)
+        XCTAssertEqual(claude.extras?.map(\.name), ["Fable"])
+        XCTAssertEqual(claude.extras?.first?.window.label, "Fable weekly")
+        XCTAssertNotNil(claude.extras?.first?.window.resetsAt)
+        // 위젯은 빈 세션 칸 대신 주간 + Fable 주간을 그린다
+        XCTAssertEqual(claude.widgetWindows(at: now).map(\.title), [String(localized: "Weekly"), "Fable weekly"])
         XCTAssertFalse(claude.freshness(at: now).isStale)
         XCTAssertNil(payload.quotaBlocks)
         XCTAssertNotNil(payload.live)
@@ -66,16 +72,18 @@ final class DemoFixtureTests: XCTestCase {
         XCTAssertEqual(payload.liveBlocks?.count ?? 0, 0)
     }
 
-    func testStaleClaudeFixtureDrawsUnknownSessionGauge() throws {
+    func testStaleClaudeFixtureDrawsUnknownFableGauge() throws {
         let payload = DemoData.make(now: now, arguments: ["-charge-demo-stale-claude"])
         let claude = try XCTUnwrap(claude(payload))
         guard case .stale(let collected) = claude.freshness(at: now) else {
             return XCTFail("사흘 전 스냅샷은 낡은 것으로 보여야 한다")
         }
         XCTAssertEqual(now.timeIntervalSince(collected), 3 * 86400, accuracy: 1)
-        let session = try XCTUnwrap(claude.session)
-        XCTAssertNil(session.resetsAt)
-        XCTAssertEqual(claude.displayState(of: session, at: now)?.isUnknown, true)
+        let fable = try XCTUnwrap(claude.extras?.first?.window)
+        XCTAssertNil(fable.resetsAt)
+        XCTAssertEqual(claude.displayState(of: fable, at: now)?.isUnknown, true)
+        // 값 미상인 창도 위젯 칸은 차지한다(자리표시자로 그린다)
+        XCTAssertEqual(claude.widgetWindows(at: now).map(\.id), ["weekly", "extra-Fable"])
         let weekly = try XCTUnwrap(claude.displayState(of: try XCTUnwrap(claude.weekly), at: now))
         XCTAssertFalse(weekly.isUnknown)
         // 기본 데모의 같은 주간 창(62%)은 소진 예측을 그리지만, 사흘 묵은 스냅샷에서는 그리지 않는다

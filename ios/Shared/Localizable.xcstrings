@@ -722,6 +722,28 @@
         }
       }
     },
+    "Current limit as a large percentage." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "큰 퍼센트로 보는 현재 한도"
+          }
+        }
+      }
+    },
+    "Current limit in a compact ring." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "작은 링으로 보는 현재 한도"
+          }
+        }
+      }
+    },
     "Data from %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1391,17 +1413,6 @@
         }
       }
     },
-    "Session and weekly percentages of your busiest provider." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "가장 바쁜 프로바이더의 세션·주간 퍼센트를 표시합니다."
-          }
-        }
-      }
-    },
     "Session and weekly usage at a glance." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1431,39 +1442,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "프로바이더별 세션·주간 사용량. 길게 눌러 프로바이더와 스타일을 선택하세요."
-          }
-        }
-      }
-    },
-    "Session and weekly usage with plan and time markers." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "플랜과 시간 마커를 포함한 세션·주간 사용량."
-          }
-        }
-      }
-    },
-    "Session usage as a large percentage." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "세션 사용량을 큰 퍼센트로 표시합니다."
-          }
-        }
-      }
-    },
-    "Session usage in a compact ring." : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "세션 사용량을 작은 링으로 표시합니다."
           }
         }
       }
@@ -1721,6 +1699,17 @@
         }
       }
     },
+    "Two limits of your busiest provider." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "가장 바쁜 프로바이더의 한도 두 개"
+          }
+        }
+      }
+    },
     "Two provider gauges with time markers." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1867,6 +1856,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "이 컴퓨터가 업로드한 사용 기록도 함께 삭제됩니다. 다시 페어링하기 전까지 이 컴퓨터의 수집기는 동기화되지 않습니다."
+          }
+        }
+      }
+    },
+    "Usage limits with plan and time markers." : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "플랜과 시간 표시가 있는 사용 한도"
           }
         }
       }

@@ -1,17 +1,41 @@
 import Foundation
 
-/// 지역 설정(비그레고리력 등)과 무관하게 안정적인 yyyy-MM-dd 처리
+/// 날짜 문자열 규칙을 한곳에 둔다: 기간 키(yyyy-MM-dd)와 서버·수집기의 ISO-8601 시각
 enum ChargeDate {
-    static let day: DateFormatter = {
+    /// 기간·스트릭 키는 지역 설정과 무관하게 항상 그레고리력 en_US_POSIX "yyyy-MM-dd"이고 시간대만 달라진다.
+    /// 주입된 달력이나 지역 달력을 그대로 쓰면 불교력 같은 지역에서 "2568-08-16"이 나와 어떤 키와도
+    /// 만나지 못하고 스트릭 보호가 조용히 사라진다. 기간 키와 보호 키는 반드시 이 공장 하나에서 만든다.
+    static func dayFormatter(timeZone: TimeZone) -> DateFormatter {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = .current
+        f.timeZone = timeZone
         return f
-    }()
+    }
+
+    /// 저장 프로퍼티라 처음 접근할 때의 시간대를 한 번만 읽는다(계산 프로퍼티로 바꾸지 않는다)
+    static let day: DateFormatter = dayFormatter(timeZone: .current)
 
     static func todayString() -> String { day.string(from: Date()) }
+
+    /// 서버·수집기 타임스탬프는 소수점 초가 있을 수도(PostgREST "….621900+00:00"), 없을 수도 있는 ISO-8601이다.
+    /// 소수점 형식을 먼저, 그다음 일반 형식으로 읽는다. ISO8601DateFormatter는 스레드 안전해 앱·위젯이 공유한다.
+    private static let isoFractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoPlain = ISO8601DateFormatter()
+
+    static func instant(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        return isoFractional.date(from: s) ?? isoPlain.date(from: s)
+    }
+
+    /// 앱이 직접 만드는 시각 문자열(추정 창의 resetsAt)은 소수점 형식으로 쓴다.
+    /// 위젯 지문이 이 문자열을 비교하므로 형식을 바꾸면 위젯이 한 번 괜히 다시 그려진다.
+    static func isoString(_ d: Date) -> String { isoFractional.string(from: d) }
 
     /// 스트릭(잔디) 그리드의 폭 — 표시부(ContentView)와 데모 데이터 생성부가 같은 값을 쓴다
     static let streakWeeks = 10
@@ -136,12 +160,23 @@ enum CollectionFreshness {
         if case .stale(let d) = self { return d }
         return nil
     }
+
+    /// 나이 한 줄 문구(앱 카드, 위젯 공용), nil이면 줄을 만들지 않는다.
+    /// - 신선하거나 시각을 모르는(NULL) 스냅샷은 아무 말도 하지 않는다, "방금"으로도, "옛날"로도 읽히면 안 된다.
+    /// - 시각이 비상식적이면(미래, 30일 초과) 나이 대신 "오래된 데이터"라고만 한다.
+    ///   침묵하면 가장 낡은 데이터가 오히려 아무 경고 없이 정상으로 읽힌다.
+    /// 상대 시각은 실제 Date() 기준으로 포맷한다(두 곳 모두 예전부터 그랬다, 위젯 타임라인 now가 아니다).
+    var ageText: String? {
+        guard isStale else { return nil }
+        guard let d = ageDate else { return String(localized: "Data out of date") }
+        return String(localized: "Data from \(d.formatted(.relative(presentation: .numeric, unitsStyle: .abbreviated)))")
+    }
 }
 
 struct Provider: Codable, Identifiable {
     let id: String
     let name: String
-    let plan: String?           // 구독 플랜 표시명 (예: "Max 20x", "Education")
+    let plan: String?           // 구독 플랜 표시명 (예: "Ultra", "Education")
     let session: RateWindow?
     let weekly: RateWindow?
     let extras: [ExtraWindow]?
@@ -158,17 +193,7 @@ struct Provider: Codable, Identifiable {
     /// 계정까지 포함한 고유 식별자 (같은 프로바이더의 계정별 카드 구분용)
     var uid: String { "\(id)#\(account ?? "")" }
 
-    private static let isoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    private static let iso = ISO8601DateFormatter()
-
-    var collectedDate: Date? {
-        guard let collectedAt else { return nil }
-        return Self.isoFrac.date(from: collectedAt) ?? Self.iso.date(from: collectedAt)
-    }
+    var collectedDate: Date? { ChargeDate.instant(collectedAt) }
 
     /// 이 프로바이더 스냅샷 하나의 신선도.
     /// 수집은 프로바이더마다 따로 깨진다(한쪽은 정상, 한쪽은 캐시 폴백), 그래서 판정도 반드시
@@ -193,8 +218,7 @@ struct Provider: Codable, Identifiable {
     /// 이 카드가 지금 한도에 대해 아무것도 말해주지 못하게 되는 나이. 기본은 가장 긴 표준 창(주간 7일)이고,
     /// 더 긴 창(예: 월간)을 가진 카드는 그 창 길이까지 기다린다. 창 길이보다 먼저 빼면 아직 유효한 한도가 사라진다.
     var outdatedCardAge: TimeInterval {
-        let windows = [session, weekly] + (extras ?? []).map { Optional($0.window) }
-        let longestMinutes = windows.compactMap { $0?.windowMinutes }.filter { $0 > 0 }.max() ?? 0
+        let longestMinutes = windows.compactMap(\.window.windowMinutes).filter { $0 > 0 }.max() ?? 0
         return max(ChargeFreshness.outdatedCardAge, TimeInterval(longestMinutes) * 60)
     }
 
@@ -280,26 +304,11 @@ struct RateWindow: Codable {
         self.label = label
     }
 
-    private static let isoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    private static let iso = ISO8601DateFormatter()
-
-    var resetDate: Date? {
-        guard let s = resetsAt else { return nil }
-        return Self.isoFrac.date(from: s) ?? Self.iso.date(from: s)
-    }
-
-    /// 리셋 시각이 이미 지난 창 (수집 지연으로 생기는 낡은 스냅샷)
-    var isStale: Bool {
-        guard let d = resetDate else { return false }
-        return d < Date()
-    }
+    var resetDate: Date? { ChargeDate.instant(resetsAt) }
 
     /// 마지막으로 알려진 리셋이 지난 경우, 다음 창을 0% 추정값으로 표시한다.
-    /// 실제 수집값이 도착하면 이 상태는 즉시 교체된다.
+    /// 실제 수집값이 도착하면 이 상태는 즉시 교체된다. 리셋이 지난 창은 여기서만 다루고,
+    /// "stale"은 언제나 스냅샷의 나이(CollectionFreshness)를 뜻한다.
     func displayState(at now: Date = Date()) -> RateWindowDisplayState? {
         guard let end = resetDate, end <= now else {
             return RateWindowDisplayState(window: self, isEstimated: false)
@@ -311,19 +320,22 @@ struct RateWindow: Codable {
         let nextReset = end.addingTimeInterval(completedWindows * duration)
         let inferred = RateWindow(
             percent: 0,
-            resetsAt: Self.isoFrac.string(from: nextReset),
+            resetsAt: ChargeDate.isoString(nextReset),
             windowMinutes: mins,
             label: label
         )
         return RateWindowDisplayState(window: inferred, isEstimated: true)
     }
 
-    /// 스냅샷 신선도까지 반영한 표시 상태. 묵은 스냅샷인데 리셋 시각도 없는 창은
-    /// 그 사이 창이 시작됐는지, 리셋됐는지조차 알 수 없어 값을 모르는 것으로 본다.
+    /// 묵은 스냅샷인데 리셋 시각도 없는 창은 그 사이 창이 시작됐는지, 리셋됐는지조차 알 수 없어 값을 모른다.
     /// (수집기 캐시가 리셋 시각 없는 창을 계속 재생하면 한 달 전 0%가 "지금 0%"로 그려졌다)
+    /// 표시 상태(displayState(at:stale:))와 한도 판정(activeLimit)이 이 판정 하나를 같이 쓴다.
+    func isValueUnknown(stale: Bool) -> Bool { stale && resetDate == nil }
+
+    /// 스냅샷 신선도까지 반영한 표시 상태
     func displayState(at now: Date = Date(), stale: Bool) -> RateWindowDisplayState? {
         guard var state = displayState(at: now) else { return nil }
-        state.isUnknown = stale && resetDate == nil
+        state.isUnknown = isValueUnknown(stale: stale)
         state.isStale = stale
         return state
     }
@@ -404,19 +416,84 @@ struct ProviderLimitState {
     var resetDate: Date? { window.resetDate }
 }
 
+/// 한 프로바이더의 한도 창 하나. session/weekly는 계정 전체, extras는 특정 모델 범위다.
+/// 저장 형식(Codable의 session/weekly/extras)은 그대로 두고 계산으로만 만든다.
+struct ProviderWindow: Identifiable {
+    enum Slot: Hashable {
+        case session
+        case weekly
+        case extra(name: String)
+    }
+
+    let slot: Slot
+    let window: RateWindow
+
+    var isProviderWide: Bool {
+        if case .extra = slot { return false }
+        return true
+    }
+
+    /// 리셋 알림 id(reset-alert-ids.json에 저장돼 비교된다)와 위젯 줄 id에 이미 쓰이는 값 그대로다.
+    /// extras에 "extra-" 접두사를 붙여야 이름이 "session"/"weekly"인 extra와 부딪히지 않는다.
+    var id: String {
+        switch slot {
+        case .session: return "session"
+        case .weekly: return "weekly"
+        case .extra(let name): return "extra-\(name)"
+        }
+    }
+
+    /// 카드, 배너, 위젯이 쓰는 창 이름: 수집기가 준 label이 우선이다
+    var title: String {
+        switch slot {
+        case .session: return window.label ?? String(localized: "Session")
+        case .weekly: return window.label ?? String(localized: "Weekly")
+        case .extra(let name): return window.label ?? name
+        }
+    }
+}
+
 extension Provider {
-    private func activeLimit(
-        title: String,
-        window: RateWindow,
-        providerWide: Bool,
-        at now: Date
-    ) -> ProviderLimitState? {
+    /// 이 프로바이더의 한도 창 목록. 세션, 주간, extras(받은 순서)를 나열하는 곳은 여기 하나다.
+    /// 순서가 의미를 가진다: strictest()의 동률과 대표 창 선택이 이 순서를 따른다.
+    /// 없는 창은 항목도 없다(0%로 그리면 "한도를 안 썼다"는 거짓말이 된다).
+    var windows: [ProviderWindow] {
+        var result: [ProviderWindow] = []
+        if let session { result.append(ProviderWindow(slot: .session, window: session)) }
+        if let weekly { result.append(ProviderWindow(slot: .weekly, window: weekly)) }
+        for extra in extras ?? [] {
+            result.append(ProviderWindow(slot: .extra(name: extra.name), window: extra.window))
+        }
+        return result
+    }
+
+    /// 지금 그릴 수 있는 창과 그 표시 상태. 신선도(stale)는 호출부가 한 번 재서 넘긴다:
+    /// 카드의 나이 문구, 배너, 게이지가 같은 측정을 봐야 staleAge 경계에서 서로 다른 말을 하지 않는다.
+    /// 여기서 freshness()를 다시 재면 두 번째 측정이 된다.
+    func drawableWindows(
+        at now: Date = Date(),
+        stale: Bool
+    ) -> [(window: ProviderWindow, state: RateWindowDisplayState)] {
+        windows.compactMap { w in
+            w.window.displayState(at: now, stale: stale).map { (window: w, state: $0) }
+        }
+    }
+
+    /// 위젯이 이 프로바이더에 그리는 창 칸. 그릴 수 있는 창을 windows 순서(세션 → 주간 → extras)로 최대 limit개(기본 2) 채운다.
+    /// Pro/Max는 세션 + 주간 그대로이고, 세션 창이 없는 Ultra는 빈 "Session -" 칸 대신 주간 + Fable 주간이 된다.
+    /// 리셋 뒤 다음 창을 추정할 수 없는 창만 뺀다(0%로 그리면 "한도를 안 썼다"는 거짓말). 값 미상인 창(묵은 스냅샷)은
+    /// 칸을 차지한 채 자리표시자로 그리므로 신선도는 여기서 재지 않는다, 흐림은 호출부가 한 번 잰 값을 쓴다.
+    func widgetWindows(at now: Date = Date(), limit: Int = 2) -> [ProviderWindow] {
+        Array(windows.filter { $0.window.displayState(at: now) != nil }.prefix(limit))
+    }
+
+    private func activeLimit(_ w: ProviderWindow, at now: Date) -> ProviderLimitState? {
+        let window = w.window
         guard window.percent >= 100 else { return nil }
         if let reset = window.resetDate, reset <= now { return nil }
-        // 게이지가 값을 모른다고 그리는 창(묵은 스냅샷 + 리셋 시각 없음)을 배너만 "한도 도달"로
-        // 단언하면 같은 카드가 두 말을 한다. 표시 규칙(displayState(of:))과 같은 판정을 쓴다.
-        if window.resetDate == nil, freshness(at: now).isStale { return nil }
-        return ProviderLimitState(title: title, window: window, isProviderWide: providerWide)
+        // 게이지가 값 미상으로 그리는 창을 배너만 "한도 도달"로 단언하면 같은 카드가 두 말을 한다
+        if window.isValueUnknown(stale: freshness(at: now).isStale) { return nil }
+        return ProviderLimitState(title: w.title, window: window, isProviderWide: w.isProviderWide)
     }
 
     /// 이 프로바이더 스냅샷의 신선도를 반영한 창 표시 상태. 앱 카드와 위젯은 창을 그릴 때 이것만 쓴다.
@@ -432,32 +509,12 @@ extension Provider {
     }
 
     func providerWideLimit(at now: Date = Date()) -> ProviderLimitState? {
-        var limits: [ProviderLimitState] = []
-        if let session, let limit = activeLimit(
-            title: session.label ?? String(localized: "Session"),
-            window: session,
-            providerWide: true,
-            at: now
-        ) { limits.append(limit) }
-        if let weekly, let limit = activeLimit(
-            title: weekly.label ?? String(localized: "Weekly"),
-            window: weekly,
-            providerWide: true,
-            at: now
-        ) { limits.append(limit) }
-        return strictest(limits)
+        strictest(windows.filter(\.isProviderWide).compactMap { activeLimit($0, at: now) })
     }
 
     /// 모델별 제한은 전체 프로바이더를 사용할 수 없다고 말하지 않는다.
     func scopedLimit(at now: Date = Date()) -> ProviderLimitState? {
-        strictest((extras ?? []).compactMap { extra in
-            activeLimit(
-                title: extra.window.label ?? extra.name,
-                window: extra.window,
-                providerWide: false,
-                at: now
-            )
-        })
+        strictest(windows.filter { !$0.isProviderWide }.compactMap { activeLimit($0, at: now) })
     }
 
     func activeLimit(at now: Date = Date()) -> ProviderLimitState? {
@@ -469,35 +526,29 @@ extension Provider {
     /// 단, 묵은 스냅샷에서 값을 모르는 세션(쉬는 중이라 리셋 시각 없음)보다는 값을 아는 주간이 대표다.
     /// 요청 제한 대기로 스냅샷이 20분을 넘기는 일이 흔한데, 그때 세션을 고르면 앱 카드는 주간 값을
     /// 그리는데 잠금화면만 자리표시자가 되고, 대표 프로바이더 순위에서도 가장 낮게 밀린다.
-    /// 카드와 홈 위젯이 그리는 모집단(세션 또는 주간)과 반드시 같아야, 같은 데이터가
+    /// 카드와 홈 위젯(widgetWindows)이 그리는 모집단과 반드시 같아야, 같은 데이터가
     /// 한쪽에서만 "No data"로 사라지지 않는다. 그래서 위젯이 아니라 여기 공유 모델에 둔다.
+    /// 규칙으로 쓰면 "그릴 수 있는 계정 전체 창 중 값을 아는 첫 창, 없으면 첫 창"이다. 값 미상 판정은
+    /// 창을 고를 때만 쓰고, 고를 수 있는 창이 있는지(모집단)는 그대로다. 계정 전체 창이 세션, 주간 둘뿐인
+    /// 지금은 "세션은 값을 아는 주간에게만 자리를 내준다"와 같은 말이다(세 번째 계정 전체 창이 생기면 다시 본다).
+    /// 그릴 수 있는 계정 전체 창이 하나도 없으면 extras에서 같은 규칙으로 고른다. 홈 위젯은 extras만 남은
+    /// 프로바이더도 그리므로, 여기서 빼면 링, 막대, 인라인만 "No data"가 된다.
     func primaryDisplayWindow(at now: Date = Date()) -> ProviderPrimaryWindow? {
         if let limit = providerWideLimit(at: now) {
             return ProviderPrimaryWindow(id: "blocking", title: limit.title, window: limit.window)
         }
-        // 값 미상 판정은 창을 고를 때만 쓴다. 고를 수 있는 창이 있는지(모집단)는 예전과 같다.
-        let sessionState = session.flatMap { displayState(of: $0, at: now) }
-        let weeklyState = weekly.flatMap { displayState(of: $0, at: now) }
-        let weeklyIsKnown = weeklyState.map { !$0.isUnknown } ?? false
-        if let session, let sessionState, !(sessionState.isUnknown && weeklyIsKnown) {
-            return ProviderPrimaryWindow(
-                id: "session",
-                title: session.label ?? String(localized: "Session"),
-                window: session
-            )
+        let drawable = drawableWindows(at: now, stale: freshness(at: now).isStale)
+        let providerWide = drawable.filter { $0.window.isProviderWide }
+        let candidates = providerWide.isEmpty ? drawable : providerWide
+        guard let chosen = (candidates.first { !$0.state.isUnknown } ?? candidates.first)?.window else {
+            return nil
         }
-        if let weekly, weeklyState != nil {
-            return ProviderPrimaryWindow(
-                id: "weekly",
-                title: weekly.label ?? String(localized: "Weekly"),
-                window: weekly
-            )
-        }
-        return nil
+        return ProviderPrimaryWindow(id: chosen.id, title: chosen.title, window: chosen.window)
     }
 }
 
 /// 대표 창 하나를 가리키는 값. 위젯의 줄 모델과 같은 모양이라 그대로 옮겨 담는다.
+/// ProviderWindow와 달리 막고 있는 한도를 가리키는 "blocking"도 담아야 해서 따로 둔다.
 struct ProviderPrimaryWindow {
     let id: String
     let title: String
@@ -521,21 +572,9 @@ struct QuotaBlock: Codable, Identifiable {
     /// 한 리셋 창에 구간이 여러 개일 수 있어(막힘, 해제, 재차단) 시작 시각까지 넣어야 유일하다.
     var id: String { "\(providerId)#\(account)#\(windowKind)#\(resetAt)#\(firstSeenAt)" }
 
-    private static let isoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    private static let iso = ISO8601DateFormatter()
-
-    private static func date(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        return isoFrac.date(from: value) ?? iso.date(from: value)
-    }
-
-    var firstSeenDate: Date? { Self.date(firstSeenAt) }
-    var resetDate: Date? { Self.date(resetAt) }
-    var clearedDate: Date? { Self.date(clearedAt) }
+    var firstSeenDate: Date? { ChargeDate.instant(firstSeenAt) }
+    var resetDate: Date? { ChargeDate.instant(resetAt) }
+    var clearedDate: Date? { ChargeDate.instant(clearedAt) }
 
     /// 5분 수집 주기에서 일시적인 절전/네트워크 지연이 세 번 겹쳐도 놓치지 않도록
     /// 자정 뒤 30분 이내의 첫 관측을 허용한다.
@@ -583,14 +622,9 @@ enum StreakProtection {
         let relevant = blocks.filter { $0.providerId == providerId }
         guard !relevant.isEmpty else { return [] }
 
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        // 비교 대상 키(ChargeDate.day가 만드는 period 문자열)는 그레고리력이다. 주입된 달력을
-        // 그대로 쓰면 불교력 같은 지역에서 "2568-08-16"이 나와 어떤 키와도 만나지 못하고
-        // 보호가 조용히 사라진다. 달력은 고정하고 시간대만 주입된 값을 따른다.
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = calendar.timeZone
+        // 보호 키는 스트릭 period 키와 같은 공장에서 만들어야 만난다(그레고리력 고정, 이유는 dayFormatter).
+        // 시간대만 주입된 달력을 따르므로 호출마다 새로 만든다.
+        let formatter = ChargeDate.dayFormatter(timeZone: calendar.timeZone)
 
         var result = Set<String>()
         for back in 0..<max(0, historyDays) {
@@ -630,17 +664,7 @@ struct CollectorDevice: Codable, Identifiable {
     /// charge_devices.collector_version. 컬럼이 없는 서버, 구버전 캐시에서는 nil
     var collectorVersion: String? = nil
 
-    private static let isoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    private static let iso = ISO8601DateFormatter()
-
-    var lastSeenDate: Date? {
-        guard let lastSeenAt else { return nil }
-        return Self.isoFrac.date(from: lastSeenAt) ?? Self.iso.date(from: lastSeenAt)
-    }
+    var lastSeenDate: Date? { ChargeDate.instant(lastSeenAt) }
 
     /// "Dusanui-MacBookPro.local" → "Dusanui-MacBookPro"
     var shortLabel: String? {
@@ -1009,21 +1033,8 @@ struct ActiveBlock: Codable {
         let totalCost: Double
     }
 
-    private static let iso: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static func parse(_ s: String) -> Date? {
-        Self.iso.date(from: s) ?? {
-            let f = ISO8601DateFormatter()
-            return f.date(from: s)
-        }()
-    }
-
-    var start: Date? { Self.parse(startTime) }
-    var end: Date? { Self.parse(endTime) }
+    var start: Date? { ChargeDate.instant(startTime) }
+    var end: Date? { ChargeDate.instant(endTime) }
 
     /// 끝 시각을 못 읽으면 만료로 본다, 만료 아님으로 두면 그 블록이 영영 안 끝나고
     /// live 게이지를 계속 차지한다 (표시를 잃는 쪽이 낡은 값을 붙잡는 쪽보다 낫다)

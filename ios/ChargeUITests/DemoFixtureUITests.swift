@@ -40,7 +40,7 @@ final class DemoFixtureUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts.matching(Self.paceLine).firstMatch.waitForExistence(timeout: 10))
     }
 
-    func testStaleClaudeShowsUnknownSessionGauge() {
+    func testStaleClaudeShowsUnknownFableGauge() {
         let app = launch(["-charge-demo-stale-claude"])
         XCTAssertTrue(app.staticTexts["No recent data"].waitForExistence(timeout: 10))
         // Claude 탭만 본다(Codex 카드는 신선해서 기존대로 소진 예측을 그린다)
@@ -49,7 +49,7 @@ final class DemoFixtureUITests: XCTestCase {
         claudeTab.tap()
         XCTAssertTrue(app.staticTexts["No recent data"].waitForExistence(timeout: 10))
         XCTAssertFalse(app.staticTexts.matching(Self.paceLine).firstMatch.exists, "묵은 주간 숫자 옆에 소진 예측을 그리지 않는다")
-        attach(app, "Stale Claude snapshot with unknown session gauge")
+        attach(app, "Stale Claude snapshot with unknown Fable gauge")
     }
 
     private static let paceLine = NSPredicate(format: "label CONTAINS %@", "On pace to run out")

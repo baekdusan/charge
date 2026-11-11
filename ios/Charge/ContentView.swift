@@ -86,13 +86,7 @@ struct ContentView: View {
                     } else if !showOnboarding {
                         // 위젯 프로세스가 무효 세션을 감지해 로그아웃했을 수 있다 —
                         // 앱도 이전 계정 데이터를 지우고 로그인 화면으로 유도한다
-                        daily = []
-                        live = nil
-                        liveBlocks = []
-                        providers = []
-                        devices = []
-                        quotaBlocks = []
-                        generatedAt = nil
+                        clearPayload()
                         error = String(localized: "Sign in to see your usage.")
                         showOnboarding = true
                     }
@@ -206,6 +200,20 @@ struct ContentView: View {
     private func syncProviderVisibility() {
         hidden = ChargeConfig.hiddenProviders
         if let pid, hidden.contains(pid) { segment = "all" }
+    }
+
+    /// 화면에 보이는 계정 스냅샷(페이로드에서 온 값 전부)을 비운다.
+    /// 새 페이로드 필드를 추가하면 load()의 대입과 여기 둘 다에 넣는다.
+    /// payloadEpoch, lastWidgetSync, segment, error, showOnboarding은 건드리지 않고
+    /// 위젯 리로드나 알림 재예약도 하지 않는다, 그건 호출부가 각자 정한다.
+    private func clearPayload() {
+        daily = []
+        live = nil
+        liveBlocks = []
+        providers = []
+        devices = []
+        quotaBlocks = []
+        generatedAt = nil
     }
 
     /// 같은 프로바이더가 계정별 카드로 2개 이상인 id 집합 — 카드마다 전체를 재스캔하지 않게 한 번만 계산
@@ -565,32 +573,15 @@ struct ContentView: View {
             }
             collectionAgeLine(freshness)
             availabilityBanner(p, freshness: freshness)
-            // 창 표시 상태도 같은 신선도 판정으로 만든다: 묵은 스냅샷의 리셋 시각 없는 창은 값 미상
-            if let state = p.session?.displayState(stale: freshness.isStale) {
+            // 창 표시 상태도 같은 신선도 판정으로 만든다: 묵은 스냅샷의 리셋 시각 없는 창은 값 미상.
+            // unavailable은 추정값(state.window.percent)으로 판정한다, 위젯은 원값을 쓰지만 카드는 리셋이 지난 창을 추정치로 그린다
+            ForEach(p.drawableWindows(stale: freshness.isStale), id: \.window.id) { item in
                 gaugeRow(
-                    title: p.session?.label ?? String(localized: "Session"),
-                    state: state,
+                    title: item.window.title,
+                    state: item.state,
                     stale: freshness.isStale,
-                    unavailable: providerLimit != nil && state.window.percent < 100
+                    unavailable: providerLimit != nil && item.state.window.percent < 100
                 )
-            }
-            if let state = p.weekly?.displayState(stale: freshness.isStale) {
-                gaugeRow(
-                    title: p.weekly?.label ?? String(localized: "Weekly"),
-                    state: state,
-                    stale: freshness.isStale,
-                    unavailable: providerLimit != nil && state.window.percent < 100
-                )
-            }
-            ForEach(p.extras ?? []) { e in
-                if let state = e.window.displayState(stale: freshness.isStale) {
-                    gaugeRow(
-                        title: e.window.label ?? e.name,
-                        state: state,
-                        stale: freshness.isStale,
-                        unavailable: providerLimit != nil && state.window.percent < 100
-                    )
-                }
             }
         }
         .cardStyle()
@@ -606,7 +597,7 @@ struct ContentView: View {
                     ? String(localized: "Unavailable · \(limit.title) limit reached")
                     : String(localized: "\(limit.title) unavailable")
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: limit.isProviderWide ? "lock.fill" : "exclamationmark.triangle.fill")
+                    Image(systemName: limit.symbolName)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(title)
                             .font(.caption.bold())
@@ -626,9 +617,9 @@ struct ContentView: View {
                     }
                     Spacer(minLength: 0)
                 }
-                .foregroundStyle(limit.isProviderWide ? .red : .orange)
+                .foregroundStyle(limit.tint)
                 .padding(9)
-                .background((limit.isProviderWide ? Color.red : Color.orange).opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
+                .background(limit.tint.opacity(0.1), in: RoundedRectangle(cornerRadius: 9))
                 .accessibilityElement(children: .combine)
             }
         }
@@ -636,17 +627,11 @@ struct ContentView: View {
 
     /// 수집된 지 오래된 스냅샷, 게이지가 현재 상태가 아닐 수 있음을 알린다.
     /// 임계값은 위젯과 공유한다(ChargeFreshness), 안 그러면 같은 데이터가 위젯에선 경고, 앱에선 정상이다.
-    /// 시각을 모르는(NULL) 스냅샷에는 아무 말도 하지 않는다, "방금"으로도, "옛날"로도 읽히면 안 된다
+    /// 문구 규칙(미상은 침묵, 믿을 수 없는 시각은 "오래된 데이터")은 CollectionFreshness.ageText에 있다
     @ViewBuilder
     private func collectionAgeLine(_ freshness: CollectionFreshness) -> some View {
-        if freshness.isStale {
-            // 시각이 비상식적이면(미래, 30일 초과) 나이 대신 "오래된 데이터"라고만 한다.
-            // 침묵하면 가장 낡은 데이터가 오히려 아무 경고 없이 정상으로 읽힌다
-            let relative = freshness.ageDate?.formatted(
-                .relative(presentation: .numeric, unitsStyle: .abbreviated)
-            )
-            Text(relative.map { String(localized: "Data from \($0)") }
-                 ?? String(localized: "Data out of date"))
+        if let text = freshness.ageText {
+            Text(text)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -920,9 +905,7 @@ struct ContentView: View {
                 segment = "all"
             }
             if let g = payload.generatedAt {
-                let f = ISO8601DateFormatter()
-                f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-                generatedAt = f.date(from: g) ?? ISO8601DateFormatter().date(from: g)
+                generatedAt = ChargeDate.instant(g)
             }
             error = nil
             // 위젯이 실제 보여주는 값이 바뀌었거나(60초 폴링 포함) 명시적 요청이면 리로드한다.
@@ -934,13 +917,7 @@ struct ContentView: View {
             }
         } catch ChargeError.notConfigured {
             // 로그아웃 상태 — 이전 계정 데이터를 화면에서 지우고 온보딩으로 유도
-            daily = []
-            live = nil
-            liveBlocks = []
-            providers = []
-            devices = []
-            quotaBlocks = []
-            generatedAt = nil
+            clearPayload()
             self.error = String(localized: "Sign in to see your usage.")
             showOnboarding = true
         } catch is CancellationError {
@@ -952,13 +929,7 @@ struct ContentView: View {
             // 캐시가 무효화된 상태(기기 삭제 직후 등)라면 화면의 이전 스냅샷도 함께 비운다 —
             // 남겨두면 삭제된 컴퓨터의 사용량이 다음 성공 로드까지 계속 보인다
             if !ChargeAPI.hasCache {
-                daily = []
-                live = nil
-                liveBlocks = []
-                providers = []
-                devices = []
-                quotaBlocks = []
-                generatedAt = nil
+                clearPayload()
             }
         }
     }
